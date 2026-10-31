@@ -129,7 +129,8 @@ def make_generator(args):
     if dtype is None:  # auto: bfloat16 only where the GPU supports it (not V100/P100)
         dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
     tok = AutoTokenizer.from_pretrained(args.model, padding_side="left")  # left: generation continues each row's end
-    model = AutoModelForCausalLM.from_pretrained(args.model, torch_dtype=dtype).to("cuda").eval()
+    # `dtype=` (transformers ≥ 4.56; `torch_dtype` is gone in 5.x, which the cluster has)
+    model = AutoModelForCausalLM.from_pretrained(args.model, dtype=dtype).to("cuda").eval()
     torch.manual_seed(args.seed)
 
     def generate(convs):

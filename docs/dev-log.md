@@ -203,6 +203,32 @@ test 39,644). 75% carry no topic flag; scores are heavy at 0 (35%).
 
 ---
 
+## Explorer cluster setup (2026-10-31)
+
+Getting one 50-joke labeling smoke test to run took most of a day. In order:
+
+| Problem | Cause | Fix |
+|---|---|---|
+| OOD "JupyterLab ML Courses": "does not supply a sub app form file" | Server-side OOD app config | Shell Access + `srun`/`sbatch`; no JupyterLab needed |
+| `pip install vllm` "stuck", then `^C` → no vllm | The final "Installing collected packages" step writes GBs to network storage silently for 10–20 min | Use `uv` (visible progress, faster); never interrupt installs; run them as batch jobs |
+| `import vllm` OK but `from vllm import LLM` → `TypeError: unsupported operand ... 'type' and 'NoneType'` | Default `python3` is **3.9**; vLLM uses 3.10+ syntax, and `import vllm` is lazy so the plain import hid it | Check the *real* import; build the venv on `module load python/3.13.5` |
+| `uv venv --python 3.12` failed after 23 min | uv's Python download from GitHub timed out (3 retries) | Use the cluster's 3.13 module as the interpreter |
+| `python3 -m pip` → "No module named pip" on compute nodes | System 3.9 ships without pip | Install `uv` with the 3.13 module's pip |
+| `python3 -m pipeline.rjokes` → `Killed` | Ran on the **login node**, which caps memory | Heavy work only on `cNNNN`/`dNNNN` compute nodes |
+| `$C` empty → "failed to create directory /venv" | New shell; exports don't carry across sessions | Full paths in instructions |
+| First GPU job landed on a **P100** | `--gres=gpu:1` takes any card; vLLM doesn't support the P100 | Request `--gres=gpu:v100-sxm2:1` |
+| vLLM 0.32 on V100: "NVIDIA driver on your system is too old (found version 12030)" | Driver supports CUDA ≤ 12.3; vLLM's torch was built for newer CUDA (which also drops Volta) | Drop vLLM; `transformers` + `torch==2.5.1+cu121` |
+| `Could not import module 'AutoModelForCausalLM'` | transformers 5.19 needs a newer torch than 2.5 | Pin `transformers>=4.56,<5` |
+| `operator torchvision::nms does not exist` | torchvision left over from the vLLM install, built for the newer torch | Uninstall torchvision/torchaudio; pinned `requirements-cluster.txt` |
+| Install sessions killed (`TIMEOUT` at 30 min; 17 GB peak on a 16 GB request) | Installs ran inside interactive GPU/CPU sessions | Installs as `sbatch --wrap` jobs with 32 GB / 1 h on `courses` |
+| `sbatch` printed nothing | A blank line after a trailing backslash → `sbatch` waited for a script on stdin | Paste commands as one line |
+| GPG signing timed out on commit | Passphrase cache (10 min) expired; the pinentry window popped up unseen | Watch for the passphrase window when committing |
+
+Result: V100-SXM2-32GB, float16, Qwen2.5-7B-Instruct, **3.4 jokes/s, 0/50 parse failures**.
+The working combination is pinned in `explorer/requirements-cluster.txt`.
+
+---
+
 ## Tooling and environment
 
 | Problem | Cause | Fix |

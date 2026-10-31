@@ -22,10 +22,23 @@ do in time. Nothing in the live loop or the sim depends on it.
 - Student dir `/courses/CS5180.<term>/students/<user>` is **deleted after grades**.
   → copy results back after every run; outputs hold ids and labels, never joke text.
 
+## Nodes and storage: designing jobs that survive
+
+- **No fixed node.** Slurm places each job on any free node in the partition, so a re-run may land
+  elsewhere. State must live on a **shared filesystem**, never on the node.
+- **Shared filesystems** (mounted everywhere): `/courses/...` (ours; gone after grades), `/home`
+  (75 GB, permanent), `/scratch` (purged monthly), `/projects` (permanent, needs a PI allocation).
+  Node-local `/tmp` dies with the job. There is **no S3-style object storage**.
+- **Checkpoint by output, not by node:** our labeling job appends results in flushed chunks and,
+  on start, skips ids already in its output. Re-submitting the same command resumes; a fixed seed
+  plus a larger `--n` extends the same sample. This is the general pattern for any long job here.
+
 ## Further reading
 
 - [NURC course guide](https://rc-docs.northeastern.edu/en/explorer-main/classroom/class_guide.html):
   partitions, storage, OOD.
+- [NURC scratch purge policy](https://rc-docs.northeastern.edu/en/explorer-main/best-practices/scratchpurge.html):
+  why nothing we keep lives in `/scratch`.
 - [Slurm quick start](https://slurm.schedmd.com/quickstart.html): `sbatch`, `squeue`,
   `scancel`.
 - [vLLM docs](https://docs.vllm.ai/): offline batch inference (`LLM.chat`).

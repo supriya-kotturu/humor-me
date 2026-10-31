@@ -71,6 +71,9 @@ laughs. A crowd-work exchange (banter with the audience) counts as its own bit.
 | **Shift** | The room's taste changes mid-set (after bit 4 of 8): the modes that were working drop, others rise. The director isn't told | `AudienceEnv(shift_at=4)`, `audience.yaml: shift` |
 | **Reaction feature** | Extra context input "same mode as last bit × last bit's reward": how *this* mode just landed, so the director can say "this just bombed, don't repeat it" | `features(..., react=True)` |
 | **Show state** | What the director knows about *this* show so far, kept apart from its career-long averages: per mode, whether it was tried tonight and how it landed. Step A feeds it in as features; B (two timescales) and C (MDP) use it more directly. | `obs["tonight"]`, `features(..., show_state=True)` |
+| **Two timescales** (step B) | The director keeps its career model *and* a per-show correction per mode that resets each show: years of experience plus tonight's read of the room | `TwoTimescale` |
+| **Surprise** | How much better or worse a bit landed than the career model predicted for that mode: reward − prediction. Tonight's correction is built from it | `TwoTimescale.update` |
+| **κ (kappa)** | "How slowly to believe tonight", in bits: correction = tonight's total surprise ÷ (bits tonight + κ). κ = 0.5 trusts tonight after one bit; κ = 8 needs ~8 bits. Swept, then picked by the pass criteria | `TWO_TS_KAPPAS` |
 
 Note: **the room's truth vs the director's prior.** `sim/audience.yaml` is the *simulated
 room's hidden truth* (what the audience actually likes; it was called `priors.yaml` before

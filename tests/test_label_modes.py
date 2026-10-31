@@ -63,3 +63,11 @@ def test_explorer_scripts_run_on_python39():
         src = f.read_text(encoding="utf-8")
         if "| None" in src or "|None" in src:
             assert "from __future__ import annotations" in src, f.name
+
+
+def test_length_order_groups_similar_lengths_and_is_a_permutation():
+    from explorer.label_modes import length_order
+    texts = ["ccc", "a", "bb", "dddd"]
+    order = length_order(texts)
+    assert sorted(order) == [0, 1, 2, 3]
+    assert [len(texts[i]) for i in order] == [1, 2, 3, 4]

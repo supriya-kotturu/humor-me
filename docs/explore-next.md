@@ -5,7 +5,7 @@ row to "Done" with its PR. Add a row whenever something is deferred so it isn't 
 
 | # | Idea | Why it might matter | Blocked by | Raised |
 |---|---|---|---|---|
-| 1 | **Human mode preference from rJokes upvotes**: Bradley–Terry over modes on year/length-matched pairs; rank-correlate with HumorGen's judge ranking | Tests whether an LLM judge ranks personas the way people do; would replace the sim's `base` (PR 3) | Explorer labeling run (`explorer/`) | 2026-10-27 |
+| 1 | **Human mode preference from rJokes upvotes**: Bradley–Terry over modes on year/length-matched pairs; rank-correlate with HumorGen's judge ranking | Tests whether an LLM judge ranks personas the way people do; would replace the sim's `base`. **Precision rule (fixed 2026-10-30):** label 30k; if any mode's 95% CI is wider than ±0.02, extend by 30k (`explorer/mode_precision.py`) | Explorer labeling run (`explorer/`) | 2026-10-27 |
 | 2 | SemEval-2021 Task 7 "HaHackathon" humor ratings | Ratings from annotators of different ages → could inform the `age` context | Verify license + contents; only if #1 falls short | 2026-10-27 |
 | 3 | New Yorker caption contest crowd ratings (Hessel et al. 2023) | Large-scale human funniness ratings, not popularity-driven like upvotes | Verify license + contents; only if #1 falls short | 2026-10-27 |
 | 5 | **Show state, step by step** (user, 2026-10-28): A = tonight's per-mode record as features → B = two timescales (career estimate + fast per-show correction) → C = MDP with show state, built with callbacks | Exp 5–6: the director can't read a room turning; it needs memory of tonight | A done (not adopted) → B next | 2026-10-28 |

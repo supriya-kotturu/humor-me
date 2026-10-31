@@ -4,14 +4,20 @@ Usage (on an Explorer GPU node, from the repo root):
     python explorer/label_modes.py --input data/processed/rjokes/train.jsonl --n 30000
     python explorer/label_modes.py --input ... --n 50 --out /tmp/smoke.jsonl     # smoke test
 
+Resumable: labels go to --out in checkpointed chunks; rerunning the same command skips what's
+done, on any node. Extending the sample = same seed, larger --n.
+
 Uniform (not stratified) sample so per-mode score distributions need no reweighting.
 Writes one JSON line per joke: id, pct, score, mode, mode2, safety{...}, raw on parse failure.
 No joke text in the output, so results can be copied back and committed if useful.
 """
 import argparse
 import json
+import os
+import pathlib
 import random
 import re
+import sys
 import time
 
 MODES = {
@@ -68,44 +74,84 @@ def parse(text: str) -> dict | None:
     }
 
 
+def load_done(path: pathlib.Path) -> tuple[set[str], set[str]]:
+    """Ids already labeled, and the models that labeled them. Drops a torn last line (a job
+    killed mid-write) by rewriting the file without it, so appending stays valid JSONL."""
+    if not path.exists():
+        return set(), set()
+    good, torn = [], False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            good.append(json.loads(line))
+        except json.JSONDecodeError:
+            torn = True
+    if torn:
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text("".join(json.dumps(r) + "\n" for r in good), encoding="utf-8")
+        os.replace(tmp, path)
+    return {r["id"] for r in good}, {r["model"] for r in good}
+
+
+def pending(rows: list[dict], done: set[str], n: int, seed: int) -> list[dict]:
+    """The first n jokes of the seed's fixed shuffle that aren't labeled yet. Same seed → same
+    order, so an interrupted run resumes exactly, and a larger n extends the same sample."""
+    order = rows[:]
+    random.Random(seed).shuffle(order)
+    return [r for r in order[:n] if r["id"] not in done]
+
+
+def chunks(items: list, size: int):
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", required=True)
     ap.add_argument("--out", default="data/processed/rjokes/modes.jsonl")
-    ap.add_argument("--n", type=int, default=30000)
+    ap.add_argument("--n", type=int, default=30000, help="total sample size (grow it to extend the same sample)")
     ap.add_argument("--model", default="Qwen/Qwen2.5-7B-Instruct")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--chunk", type=int, default=2000, help="jokes per checkpoint")
     ap.add_argument("--max-model-len", type=int, default=2048)
     args = ap.parse_args()
 
-    from vllm import LLM, SamplingParams  # imported late so --help works without a GPU
+    out = pathlib.Path(args.out)
+    done, models = load_done(out)
+    if models - {args.model}:
+        sys.exit(f"{out} was labeled by {sorted(models)}; refusing to mix in {args.model}. Use another --out.")
+    rows = [json.loads(line) for line in open(args.input, encoding="utf-8")]
+    todo = pending(rows, done, args.n, args.seed)
+    print(f"{len(done)} already labeled; {len(todo)} to go (n={args.n}, seed={args.seed})", flush=True)
+    if not todo:
+        return
 
-    rows = [json.loads(l) for l in open(args.input, encoding="utf-8")]
-    random.Random(args.seed).shuffle(rows)
-    rows = rows[: args.n]
+    from vllm import LLM, SamplingParams  # imported late so --help and resume checks work without a GPU
 
     llm = LLM(model=args.model, max_model_len=args.max_model_len, seed=args.seed)
     params = SamplingParams(temperature=0.0, max_tokens=120)
-    convs = [[{"role": "system", "content": SYSTEM},
-              {"role": "user", "content": PROMPT.replace("{joke}", r["text"])}] for r in rows]
-
-    t0 = time.time()
-    outs = llm.chat(convs, params)
-    dt = time.time() - t0
-
-    failed = 0
-    with open(args.out, "w", encoding="utf-8") as f:
-        for r, o in zip(rows, outs):
-            text = o.outputs[0].text
-            lab = parse(text)
-            rec = {"id": r["id"], "score": r["score"], "pct": r["pct"], "model": args.model}
-            if lab:
-                rec.update(lab)
-            else:
-                failed += 1
-                rec["raw"] = text[:200]
-            f.write(json.dumps(rec) + "\n")
-    print(f"{len(rows)} jokes in {dt:.0f}s ({len(rows) / dt:.1f}/s), parse failures {failed}")
+    t0, labeled, failed = time.time(), 0, 0
+    for batch in chunks(todo, args.chunk):
+        convs = [[{"role": "system", "content": SYSTEM},
+                  {"role": "user", "content": PROMPT.replace("{joke}", r["text"])}] for r in batch]
+        outs = llm.chat(convs, params)
+        with open(out, "a", encoding="utf-8") as f:
+            for r, o in zip(batch, outs):
+                text = o.outputs[0].text
+                lab = parse(text)
+                rec = {"id": r["id"], "score": r["score"], "pct": r["pct"], "model": args.model, "seed": args.seed}
+                if lab:
+                    rec.update(lab)
+                else:
+                    failed += 1
+                    rec["raw"] = text[:200]
+                f.write(json.dumps(rec) + "\n")
+            # The checkpoint: once a chunk is on disk, a killed job never redoes it.
+            f.flush()
+            os.fsync(f.fileno())
+        labeled += len(batch)
+        dt = time.time() - t0
+        print(f"{len(done) + labeled}/{args.n} labeled, {labeled / dt:.1f}/s, parse failures {failed}", flush=True)
 
 
 if __name__ == "__main__":

@@ -71,6 +71,14 @@ laughs. A crowd-work exchange (banter with the audience) counts as its own bit.
 | **Shift** | The room's taste changes mid-set (after bit 4 of 8): the modes that were working drop, others rise. The director isn't told | `AudienceEnv(shift_at=4)`, `audience.yaml: shift` |
 | **Reaction feature** | Extra context input "same mode as last bit × last bit's reward": how *this* mode just landed, so the director can say "this just bombed, don't repeat it" | `features(..., react=True)` |
 | **Show state** | What the director knows about *this* show so far, kept apart from its career-long averages: per mode, whether it was tried tonight and how it landed. Step A feeds it in as features; B (two timescales) and C (MDP) use it more directly. | `obs["tonight"]`, `features(..., show_state=True)` |
+| **Reward hypothesis** | Every goal can be written as maximizing expected total reward, so whatever the reward allows (loopholes included) is what the agent learns. Why the reward is a laugh signal and not a raw laugh count (invariant 5) | |
+| **Agent state** | The summary of the show so far that the director actually chooses on. Today: context + last bit's mode and reward | `features()` |
+| **Markov property** | The agent state holds everything that matters for what happens next, so earlier history adds nothing. The director's state is *not* Markov when a room turns mid-show: same features, different outcome depending on tonight. Show state exists to fix that | |
+| **MDP (Markov decision process)** | States, actions, transition probabilities, rewards, discount. A show as an MDP: 8 steps (bits), no discount, return = total laughs, state = context + show state + open hooks. Needed once actions change the future (fatigue, callbacks) | Step C |
+| **Return** | Total reward from now to the end of the show (discounted if the task never ends) | |
+| **Value function (v, q)** | Expected return from a state (v) or from taking an action in a state (q). LinUCB's θ̂ᵀx is a one-step q estimate per mode | `LinUCB.act` |
+| **Bellman equation** | Value = immediate reward + value of the state you land in. The optimal version takes the max over next actions. A bandit drops the "state you land in" term, which is why it can't value planting a hook | Step C |
+| **UCB (optimism)** | Pick the arm with the highest plausible value: estimate + uncertainty bonus that shrinks with plays (UCB1: √(2 ln t / n) for rewards in [0, 1]). LinUCB is its linear-feature version | `LinUCB` |
 
 Note: **the room's truth vs the director's prior.** `sim/audience.yaml` is the *simulated
 room's hidden truth* (what the audience actually likes; it was called `priors.yaml` before

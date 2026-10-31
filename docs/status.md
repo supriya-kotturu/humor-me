@@ -2,6 +2,9 @@
 
 Last updated: 2026-10-31. Update this file whenever the state below changes.
 
+Learning the material from scratch (RL foundations → our experiments → Explorer runbook):
+[study-guide.md](study-guide.md).
+
 ## Where we are
 
 | Area | State |

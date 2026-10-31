@@ -23,17 +23,33 @@ are **deleted after final grades**: copy results back to the laptop after every 
 
 ## One-time setup (CPU is enough)
 
-OOD → Courses → JupyterLab, partition `courses`, then in its terminal:
+Works from any terminal: **OOD → Clusters → Explorer Shell Access** (no JupyterLab needed; the
+"JupyterLab ML Courses" app showed "does not supply a sub app form file" on 2026-10-31, and its
+built-in env has no vLLM anyway). Don't install on the login node; take a CPU session first:
 ```bash
-ls -d /courses/CS5180.*/students/$USER       # find your dir; the folder suffix is the term code
-COURSE_DIR=/courses/CS5180.<term>/students/$USER
-cd $COURSE_DIR && git clone <repo url> humor-me
-module avail python                          # pick a 3.10–3.12 if the default is older
+srun -p courses --cpus-per-task=4 --mem=16G --time=01:00:00 --pty bash
+export COURSE_DIR=/courses/CS5180.202710/students/$USER   # term 202710 = Fall 2026
+cd $COURSE_DIR && git clone https://github.com/supriya-kotturu/humor-me.git && cd humor-me
+python3 --version                            # default was 3.9 (2026-10-31); scripts are 3.9-safe
 python3 -m venv $COURSE_DIR/venv && source $COURSE_DIR/venv/bin/activate
-pip install vllm                             # pulls a matching torch; ~10 min
+pip install vllm                             # 10–20 min on network storage; wait for "Successfully installed"
+python -c "import vllm, sys; print(vllm.__version__, sys.version)"   # must import cleanly
+exit                                         # release the CPU session
 ```
+If `import vllm` fails on 3.9, rebuild with a newer Python: `module avail python`, `module load`
+a 3.10–3.12, then repeat the venv lines. Typing while pip runs queues the input; it runs after.
+
 Copy `data/processed/rjokes/train.jsonl` (gitignored; joke text never goes into git) to the
-same path inside the clone: OOD Files → Upload, or `scp`.
+same path inside the clone: OOD **Files** → `$COURSE_DIR/humor-me/data/processed/rjokes/` → Upload,
+or `scp`.
+
+**GPU smoke test without JupyterLab:**
+```bash
+srun -p courses-gpu --gres=gpu:1 --cpus-per-task=4 --mem=12G --time=00:30:00 --pty bash
+cd /courses/CS5180.202710/students/$USER/humor-me && source explorer/env.sh && nvidia-smi
+python explorer/label_modes.py --input data/processed/rjokes/train.jsonl --n 50 --out /tmp/smoke.jsonl
+exit                                         # one GPU job at a time: free it before sbatch
+```
 
 ## Runs
 

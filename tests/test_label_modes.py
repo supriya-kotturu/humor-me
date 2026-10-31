@@ -54,3 +54,12 @@ def test_precision_halfwidth_shrinks_with_more_jokes():
     big = per_mode([{"mode": "cynic", "pct": p} for p in (0.1, 0.9) * 5000])
     assert big["cynic"]["halfwidth"] < small["cynic"]["halfwidth"] / 9      # ~1/sqrt(100)
     assert "raw" not in per_mode([{"raw": "garbage", "pct": 0.5}])          # failures ignored
+
+
+def test_explorer_scripts_run_on_python39():
+    """The Explorer venv is Python 3.9 (2026-10-31): `X | None` hints must not be evaluated there."""
+    import pathlib
+    for f in pathlib.Path(__file__).resolve().parent.parent.joinpath("explorer").glob("*.py"):
+        src = f.read_text(encoding="utf-8")
+        if "| None" in src or "|None" in src:
+            assert "from __future__ import annotations" in src, f.name

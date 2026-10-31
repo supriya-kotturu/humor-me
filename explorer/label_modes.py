@@ -11,6 +11,8 @@ Uniform (not stratified) sample so per-mode score distributions need no reweight
 Writes one JSON line per joke: id, pct, score, mode, mode2, safety{...}, raw on parse failure.
 No joke text in the output, so results can be copied back and committed if useful.
 """
+from __future__ import annotations  # cluster venv is Python 3.9: keeps `X | None` hints unevaluated
+
 import argparse
 import json
 import os

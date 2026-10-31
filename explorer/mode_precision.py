@@ -7,6 +7,8 @@ Rule fixed before labeling (explore-next #1): if any mode's 95% CI half-width ex
 --max-halfwidth, extend the sample by 30k (same seed, larger --n) and check again. Precision of
 a mean depends on jokes per mode, not on the share of rJokes labeled.
 """
+from __future__ import annotations  # cluster venv is Python 3.9: keeps `X | None` hints unevaluated
+
 import argparse
 import collections
 import json

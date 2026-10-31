@@ -19,6 +19,7 @@ set -euo pipefail
 source explorer/env.sh
 nvidia-smi --query-gpu=name,memory.total --format=csv
 python explorer/label_modes.py --input data/processed/rjokes/train.jsonl --n "${N:-30000}" \
-    --seed "${SEED:-0}" --dtype "${DTYPE:-half}" --backend "${BACKEND:-transformers}" \n    ${MODEL:+--model "$MODEL"}
+    --seed "${SEED:-0}" --dtype "${DTYPE:-half}" --backend "${BACKEND:-transformers}" \
+    ${MODEL:+--model "$MODEL"}
 # Exit code 1 here means "sample too small for the precision rule", not a failed labeling run.
 python explorer/mode_precision.py || echo "precision rule not met: extend with N=$(( ${N:-30000} + 30000 ))"

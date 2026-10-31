@@ -71,3 +71,12 @@ def test_length_order_groups_similar_lengths_and_is_a_permutation():
     order = length_order(texts)
     assert sorted(order) == [0, 1, 2, 3]
     assert [len(texts[i]) for i in order] == [1, 2, 3, 4]
+
+
+def test_shell_scripts_have_no_literal_backslash_n():
+    """A heredoc-escaping slip once wrote a literal backslash-n instead of a line break into the sbatch file
+    (2026-10-31), which would break the job's command line on the cluster."""
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent / "explorer"
+    for f in list(root.glob("*.sbatch")) + list(root.glob("*.sh")):
+        assert "\\n" not in f.read_text(encoding="utf-8"), f.name

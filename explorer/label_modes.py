@@ -116,6 +116,8 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--chunk", type=int, default=2000, help="jokes per checkpoint")
     ap.add_argument("--max-model-len", type=int, default=2048)
+    # V100/P100 have no bfloat16 (Qwen's default); vLLM refuses to start unless told "half".
+    ap.add_argument("--dtype", default="auto", help="auto | half | bfloat16 (use half on V100)")
     args = ap.parse_args()
 
     out = pathlib.Path(args.out)
@@ -130,7 +132,7 @@ def main() -> None:
 
     from vllm import LLM, SamplingParams  # imported late so --help and resume checks work without a GPU
 
-    llm = LLM(model=args.model, max_model_len=args.max_model_len, seed=args.seed)
+    llm = LLM(model=args.model, max_model_len=args.max_model_len, seed=args.seed, dtype=args.dtype)
     params = SamplingParams(temperature=0.0, max_tokens=120)
     t0, labeled, failed = time.time(), 0, 0
     for batch in chunks(todo, args.chunk):

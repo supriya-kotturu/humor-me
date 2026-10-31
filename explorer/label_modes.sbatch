@@ -6,7 +6,8 @@
 # after a node failure.
 #SBATCH --job-name=humor-label
 #SBATCH --partition=courses-gpu
-#SBATCH --gres=gpu:1
+# courses-gpu has V100-SXM2 and P100 nodes; vLLM doesn't support the P100, so ask for a V100.
+#SBATCH --gres=gpu:v100-sxm2:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=12G
 #SBATCH --time=04:00:00
@@ -18,6 +19,6 @@ set -euo pipefail
 source explorer/env.sh
 nvidia-smi --query-gpu=name,memory.total --format=csv
 python explorer/label_modes.py --input data/processed/rjokes/train.jsonl --n "${N:-30000}" \
-    --seed "${SEED:-0}" ${MODEL:+--model "$MODEL"}
+    --seed "${SEED:-0}" --dtype "${DTYPE:-half}" ${MODEL:+--model "$MODEL"}
 # Exit code 1 here means "sample too small for the precision rule", not a failed labeling run.
 python explorer/mode_precision.py || echo "precision rule not met: extend with N=$(( ${N:-30000} + 30000 ))"

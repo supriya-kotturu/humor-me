@@ -173,6 +173,35 @@ Figure: `reports/figures/shift_recovery_by_set_length.png`.
 3. Why: a single learned weight on "tonight's mean" serves shifted and steady rooms alike, so it
    compromises. Step B makes the per-show correction explicit.
 
+## R2: rJokes mode labels (2026-10-31)
+
+`sbatch explorer/label_modes.sbatch` (job 11534420, V100-SXM2-32GB, Qwen2.5-7B-Instruct, fp16,
+greedy). 30,000 jokes from `train.jsonl` (seed 0) in ~1.6 h at 5.2 jokes/s; 11 parse failures
+(0.04%). Output: `data/processed/rjokes/modes.jsonl` (ids + labels, no text). Logs:
+[submit + progress](../assets/labeling/batch-labeling.png),
+[end + precision table](../assets/labeling/batch-labeling-30k.png).
+
+`pct` = upvote percentile within the joke's year (0.5 = median joke that year).
+
+| Mode | Jokes | Share | Mean pct | 95% CI ± |
+|---|---|---|---|---|
+| optimist | 399 | 1.3% | 0.530 | **0.029** |
+| neurotic | 6,321 | 21.1% | 0.525 | 0.007 |
+| observer | 3,372 | 11.2% | 0.521 | 0.009 |
+| absurdist | 3,165 | 10.6% | 0.515 | 0.010 |
+| cynic | 8,152 | 27.2% | 0.508 | 0.006 |
+| wordsmith | 8,394 | 28.0% | 0.470 | 0.006 |
+| none | 186 | 0.6% | 0.418 | 0.039 |
+
+**Findings**
+1. **Precision rule not met:** optimist's CI is ±0.029 (> ±0.02), so the sample is extended by
+   30k as fixed before the run. Needed: ~840 optimist jokes (1.96 · 0.296 / 0.02)²; at a 1.3% share,
+   60k gives ~800, so a further extension is likely.
+2. **Modes are very unevenly represented on Reddit:** wordsmith (puns) and cynic make up 55%;
+   optimist 1.3%. Sample size per mode, not total, sets precision.
+3. **Spread between modes is small:** 0.47–0.53 in percentile, with wordsmith clearly last
+   (also last in HumorGen's judge ranking). Not yet comparable to the judge ranking: that needs
+   the year/length-matched pairs of explore-next #1, and a hand check of 100 labels first.
 ## PR: show state, step B (2026-10-31)
 
 `evaluate_shift.run_lengths(lengths=[8, 16], total_bits=3200, seeds=10, names=TWO_TS_POLICIES)`

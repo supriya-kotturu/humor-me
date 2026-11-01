@@ -255,3 +255,21 @@ NSFW). Labels: `data/labels/rjokes_hand_check.csv`. No pass criterion was fixed 
 4. **Safety flags are not usable as a filter:** the user flagged 16 rows (sexual 8, targets_group 3,
    about_bodies 1, outside the schema 4: guns, death, Nazis, profanity); the judge flagged **none**
    of them. Notes were opportunistic, so only misses are measured, not false alarms.
+
+**Examples** (verbatim from r/Jokes via [rJokes](https://github.com/orionw/rJokesData); a few rows
+quoted for illustration only, the full set stays local, see decisions.md 2026-10-31). Row = `n` in
+`data/labels/rjokes_hand_check.csv`.
+
+| Row | Joke | Judge | Hand | What it shows |
+|---|---|---|---|---|
+| 2 | My Grandpa's last words to me were "Wanna see how far I can kick this bucket?" | absurdist | ✅ | Agreement |
+| 90 | My teacher told me I'd never be good at poetry because I'm dyslexic But so far I've made three jugs and a vase and they're lovely | optimist | ✅ | Agreement on the rarest mode |
+| 97 | What do you call a dictator running a bookshop? The Supreme Reader. | wordsmith | ✅ | Agreement |
+| 38 | What were the final words of the man stuck in a spring? The tension is killing me. | neurotic | wordsmith | Pun filed under its surface topic (tension) |
+| 57 | Wanna hear a joke about ghosts? That's the spirit. | none | wordsmith | Pun missed entirely |
+| 71 | Well, well, well... That's three holes in the ground. | observer | wordsmith | Pun filed under its setup |
+| 78 | I doubt vodka is the answer.... But it's worth a shot | optimist | wordsmith | Pun read as a positive spin |
+| 1 | a horse, a pediatrician and a fish walk into a bar the horse stands in place, the fish dies and pediatrician just missed his shift | absurdist | ? | Joke didn't land, no mode assignable |
+
+Safety misses are described, not quoted: 8 rows of sexual content or innuendo (e.g. row 67, a
+delivery-driver double meaning), 3 targeting a group, 1 about bodies; the judge flagged none.

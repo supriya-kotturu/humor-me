@@ -9,7 +9,7 @@ R2), sim priors (PR 3), a learned joke scorer (stretch).
 
 ~570k posts from Reddit's r/Jokes (2008–2019) with upvote-based scores. The official splits
 hold 432k jokes with an integer score 0–11 (≈ ln upvotes). One-liners and setup/punch jokes,
-Reddit taste, much offensive material. Terms: Reddit's, so use locally and never redistribute.
+Reddit taste, much offensive material. Terms: Reddit's, so use locally and never redistribute the dataset; quoting a few rows in docs is fine (decisions.md 2026-10-31).
 
 ## What prep had to fix
 

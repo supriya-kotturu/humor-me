@@ -232,3 +232,11 @@ source of jokes, so its safety labels are never relied on. **Chose (c)** (user):
 only mode labels, and invariant 1 already puts safety in the live loop. Rows 75 and 83 (judge wrong,
 true mode unknown) stay unfilled; no re-labeling.
 Evidence: notebooks/decisions.ipynb Exp 9; metrics.md "Hand check of R2 labels".
+
+## 2026-10-31 — Quote a few rJokes rows in docs; never the dataset
+The data rule was "Reddit terms: local use, never redistribute". The report needs examples to
+show what the hand check found. Options: paraphrase (no Reddit text, loses the wording) or quote a
+handful of rows verbatim with attribution. **Chose quoting** (user): a few illustrative rows are
+not the dataset. Limits: a small table in docs only (metrics.md hand check: 8 rows), credited to
+r/Jokes via rJokes, nothing NSFW quoted; the full hand-check file with text stays local
+(`data/processed/rjokes/hand_check_with_text.csv`, gitignored).

@@ -24,4 +24,13 @@ flowchart TD
     BITS -->|"3 · LLM annotation"| SETS["Annotated sets"]
     SETS -->|"5 · Pk / WindowDiff, spot checks"| OK{"Good enough?"}
     OK -->|yes| USE["Reward model · planner demos · skeletons · sim priors"]
+
+    classDef data fill:#fff4c2,stroke:#b8860b,color:#000
+    classDef model fill:#e8dcf8,stroke:#6a1b9a,color:#000
+    classDef infra fill:#d6e9fb,stroke:#1565c0,color:#000
+    classDef rl fill:#d4f4dd,stroke:#2e7d32,color:#000
+    class PDF,BODY,EV,BEATS data
+    class BITS,SETS model
+    class OK infra
+    class USE rl
 ```

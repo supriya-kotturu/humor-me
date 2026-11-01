@@ -10,8 +10,14 @@ Concepts behind each stage: [wiki/](wiki/README.md).
 ## Stages
 
 ```mermaid
+%%{init: {"theme": "default"}}%%
 flowchart LR
     A["S0 ingest<br/>✅"] --> B["S1+S2 markers<br/>✅"] --> C["S3 beats<br/>✅"] --> D["S4 bits<br/>⏳ TextTiling+LLM"] --> E["S5 annotate<br/>⏳ LLM"] --> F["S6 validate<br/>⏳"]
+
+    classDef infra fill:#d6e9fb,stroke:#1565c0,color:#000
+    classDef infraTodo fill:#d6e9fb,stroke:#1565c0,stroke-dasharray:5 5,color:#000
+    class A,B,C infra
+    class D,E,F infraTodo
 ```
 
 | Stage | Module | Status | Input | Output | Concepts |

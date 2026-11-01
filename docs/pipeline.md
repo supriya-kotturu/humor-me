@@ -6,6 +6,7 @@ text the model imitates (see decisions.md, 2026-10-20). All data lives in `data/
 ## Overview
 
 ```mermaid
+%%{init: {"theme": "default"}}%%
 flowchart TD
     RAW[/"data/raw/*.pdf<br/>19 specials"/] --> S0["S0 Ingest<br/>PDF → text, strip site boilerplate"]
     S0 --> S1["S1 Extract markers<br/>[...] / (...) → events with offsets"]
@@ -24,11 +25,23 @@ flowchart TD
     OUT --> C2["Planner demos<br/>(bit sequences)"]
     OUT --> C3["Bit skeletons →<br/>synthetic robot-voice sets → SFT"]
     OUT --> C4["Sim audience priors<br/>(laugh density, timing)"]
+
+    classDef data fill:#fff4c2,stroke:#b8860b,color:#000
+    classDef infra fill:#d6e9fb,stroke:#1565c0,color:#000
+    classDef model fill:#e8dcf8,stroke:#6a1b9a,color:#000
+    classDef rl fill:#d4f4dd,stroke:#2e7d32,color:#000
+    classDef stop fill:#f8d7d7,stroke:#c62828,color:#000
+    class RAW,LEX,OUT,NG data
+    class S0,S1,S2,S2b,S3,S6 infra
+    class S4,S5,C1,C3 model
+    class C2,C4 rl
+    class FAIL stop
 ```
 
 ## How the outputs feed the agent
 
 ```mermaid
+%%{init: {"theme": "default"}}%%
 flowchart LR
     subgraph Offline
         BEATS[beats.jsonl] --> LP[Laugh predictor]
@@ -45,6 +58,15 @@ flowchart LR
     BC --> PL
     SIM -. trains .-> PL
     SFT --> GEN
+
+    classDef data fill:#fff4c2,stroke:#b8860b,color:#000
+    classDef model fill:#e8dcf8,stroke:#6a1b9a,color:#000
+    classDef rl fill:#d4f4dd,stroke:#2e7d32,color:#000
+    classDef ui fill:#fbdce8,stroke:#ad1457,color:#000
+    class BEATS,BITS,SETS,SK,SYN data
+    class LP,RANK,SFT,GEN,GUARD model
+    class BC,SIM,ROOM,PL rl
+    class TTS,MIC ui
 ```
 
 ## Stages

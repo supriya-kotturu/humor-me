@@ -28,6 +28,7 @@ never as text the model imitates.
 ## How the pieces depend on each other
 
 ```mermaid
+%%{init: {"theme": "default"}}%%
 flowchart LR
     RAW[/"data/raw PDFs<br/>(you download)"/] --> PIPE["pipeline/<br/>S0 ingest → S2 markers → … S6"]
     CFG[("data/markers.yaml<br/>data/body_overrides.yaml")] --> PIPE
@@ -40,6 +41,17 @@ flowchart LR
     FE -->|operator events| BE
     LLM(["LLM provider"]) --> BE
     PROBE["scripts/latency_probe.py"] -. picks .-> LLM
+
+    classDef data fill:#fff4c2,stroke:#b8860b,color:#000
+    classDef infra fill:#d6e9fb,stroke:#1565c0,color:#000
+    classDef model fill:#e8dcf8,stroke:#6a1b9a,color:#000
+    classDef rl fill:#d4f4dd,stroke:#2e7d32,color:#000
+    classDef ui fill:#fbdce8,stroke:#ad1457,color:#000
+    class RAW,CFG,PROC data
+    class PIPE,BE,PROBE infra
+    class RM,LLM model
+    class SIM rl
+    class FE ui
 ```
 
 Build order: **setup → pipeline (offline data) → RL training in sim → backend + frontend

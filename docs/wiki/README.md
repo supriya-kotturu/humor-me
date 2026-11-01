@@ -25,12 +25,22 @@ how that maps to a learning problem → how we test it.
 | – | [Glossary](glossary.md) | Everywhere | Shared vocabulary: comedy units, agent roles, learning and evaluation terms |
 
 ```mermaid
+%%{init: {"theme": "default"}}%%
 flowchart LR
     A["1 · LLM humor<br/>falls short"] --> B["2 · comedians build<br/>bits and sets"]
     B --> C["3 · picking the next bit's mode<br/>= contextual bandit"]
     C --> D["4 · test it in a<br/>simulated room"]
     E["5 · rJokes"] -->|priors| D
     F["6 · Explorer"] -->|labels rJokes| E
+
+    classDef concept fill:#fde3cf,stroke:#d84315,color:#000
+    classDef rl fill:#d4f4dd,stroke:#2e7d32,color:#000
+    classDef data fill:#fff4c2,stroke:#b8860b,color:#000
+    classDef infra fill:#d6e9fb,stroke:#1565c0,color:#000
+    class A,B concept
+    class C,D rl
+    class E data
+    class F infra
 ```
 
 ## Adding a page
@@ -43,3 +53,10 @@ after each merged wiki change. Edit here, never on the GitHub wiki (it gets over
 
 Template: `# Title` → `**Where it fits / Used in**` → concept sections → `## In this project`
 → `## Further reading` (links checked to be live when added; say what each link is good for).
+
+Mermaid diagrams start with `%%{init: {"theme": "default"}}%%` on the line after the fence, so
+they render light in GitHub's dark mode too (`tests/test_docs.py` checks every tracked `.md`).
+Colour boxes by component type with `classDef`, same palette everywhere: comedy/concept
+`#fde3cf`, RL/decision `#d4f4dd`, model/LLM `#e8dcf8`, data `#fff4c2`, infra/jobs `#d6e9fb`,
+UI/audio `#fbdce8`, stop/rejected `#f8d7d7`; not built yet = same fill with
+`stroke-dasharray:5 5`. Copy the `classDef` lines from [docs/study-guide.md](../study-guide.md).

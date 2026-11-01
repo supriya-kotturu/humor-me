@@ -36,6 +36,7 @@ data flow. Colours: green = RL/decision, purple = models/LLM, yellow = data, blu
 pink = UI/audio I/O.
 
 ```mermaid
+%%{init: {"theme": "default"}}%%
 flowchart LR
     subgraph LAPTOP["Laptop (RTX 4060): offline"]
         RJ["rJokes prep R1<br/>403k jokes, pct per year"]:::dataDone
@@ -108,6 +109,7 @@ flowchart LR
 ### Show-state ladder (the open research thread)
 
 ```mermaid
+%%{init: {"theme": "default"}}%%
 flowchart LR
     S0["LinUCB, career only<br/>95% oracle steady<br/>80% after a turn"]:::done
     A["A: tonight's record<br/>as 2 features<br/>FAILED both criteria"]:::rejected
@@ -467,6 +469,7 @@ Every experiment is `run(**params)` → `sim.cache.run_or_load` → a section in
 [notebooks/decisions.ipynb](../notebooks/decisions.ipynb). Full tables: [metrics.md](metrics.md).
 
 ```mermaid
+%%{init: {"theme": "default"}}%%
 flowchart TD
     E1["Exp 1-2: is there anything to learn?<br/>per joke: random beat every fixed mode"]:::bad
     E3["Per bit instead<br/>best fixed beats random by 3-9 laughs"]:::good
@@ -547,6 +550,7 @@ Deeper: [wiki/explorer-hpc.md](wiki/explorer-hpc.md), [explorer/README.md](../ex
 ### 5.1 Mental model: four layers that must agree
 
 ```mermaid
+%%{init: {"theme": "default"}}%%
 flowchart TB
     L1["Where am I?<br/>login node explorer-0X vs compute cNNNN/dNNNN"]:::infra
     L2["What runs it?<br/>srun interactive vs sbatch batch; partition limits"]:::infra
@@ -571,6 +575,7 @@ then the job type, then `which python3 && python3 -V`, then `nvidia-smi` + `torc
 ### 5.2 What we tried, why it failed, what we did
 
 ```mermaid
+%%{init: {"theme": "default"}}%%
 flowchart TD
     START["Goal: label 30k jokes with a 7B model"] --> OOD{"OOD JupyterLab<br/>ML Courses app"}
     OOD -->|"'no sub app form file'"| SHELL["Shell Access + srun/sbatch"]

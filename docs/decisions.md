@@ -186,6 +186,20 @@ Why: one linear weight on "tonight's mean" has to serve both shifted and steady 
 settles on a compromise. Next: step B, where tonight's correction is explicit and per show.
 Evidence: notebooks/decisions.ipynb Exp 7; metrics.md "show state step A".
 
+## 2026-10-31 — Show state step B (career + tonight's correction): not adopted; C needs exploration and fatigue planning
+Step B kept LinUCB as the career model and added a per-show correction per mode: tonight's
+surprise (reward − career prediction) ÷ (bits tonight + κ), reset each show. Swept κ ∈ {0.5,
+1, 2, 4, 8} against the same pre-set criteria as A (shifted gain ≥ 0.05, steady change ≥ −0.01,
+at 8 and 16 bits). **No κ passed**; most made shifted shows *worse* (−0.01 to −0.03) and steady
+shows lost up to −0.043. Diagnosis (tracked, not guessed): (1) **win-stay meets fatigue**:
+trusting tonight fast nearly doubles repeats of the last mode (29% → 54%) and the room tires of
+repeats; (2) **it learns what bombed, not what's now good**: untried modes get no correction, so
+after a turn it still picks a hurt mode about as often (51% vs 48%). Some signal exists (16-bit
+κ = 8 climbs past LinUCB late in the set) but is outweighed. Consequence for C: the director must
+*value trying an untried mode* after a turn (exploration within the show) and *plan around
+fatigue*, which is sequential decision-making, not a better per-bit correction.
+Evidence: notebooks/decisions.ipynb Exp 8; metrics.md "show state step B".
+
 ## 2026-10-31 — Sim `base`: HumorGen win rates mapped linearly (retroactive record)
 Formula: `base = 0.3 + 2 * (win_rate - 0.5)` (sim/audience.yaml), turning Table 4's six
 LLM-judge win rates into the room's general mode strengths (neurotic 0.57 ... wordsmith 0.00).

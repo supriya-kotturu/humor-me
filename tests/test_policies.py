@@ -104,3 +104,41 @@ def test_show_state_policies_act_and_learn(cls):
     a = p.act(o)
     p.update(o, a, 0.4)
     assert p.A.shape[-1] == n_features(show_state=True)
+
+
+# --- show state step B: two timescales ---
+from sim.policies import TwoTimescale
+
+
+def test_linucb_scores_split_keeps_act_unchanged():
+    p = LinUCB(np.array([0.1, 0.5, 0.2, 0.3, 0.2, 0.1]), seed=0)
+    o = obs(last_mode=1, last_reward=0.3)
+    s = p.scores(o)
+    assert s.shape == (6, 2) and p.act(o) == int(np.argmax(s[:, 0] + s[:, 1]))
+
+
+def test_tonight_correction_lowers_a_mode_that_bombed_and_resets_next_show():
+    two = TwoTimescale(LinUCB(np.full(6, 0.3), seed=0), kappa=1.0)
+    first = {**obs(), "t": 0}
+    two.act(first)
+    two.update(first, 2, 0.0)                    # mode 2 bombed vs a ~0.3 prediction
+    corr = two.correction(6)
+    assert corr[2] < -0.1 and all(corr[a] == 0 for a in (0, 1, 3, 4, 5))
+    two.act({**obs(), "t": 0})                   # next show starts
+    assert not two.correction(6).any()
+
+
+def test_large_kappa_behaves_like_the_career_model():
+    prior = np.array([0.1, 0.5, 0.2, 0.3, 0.2, 0.1])
+    slow, plain = TwoTimescale(LinUCB(prior, seed=0), kappa=1e9), LinUCB(prior, seed=0)
+    env = AudienceEnv()
+    for show in range(3):
+        o = env.reset(Context("bar", "normal", "mixed"), seed=show)
+        done = False
+        while not done:
+            a = slow.act(o)
+            assert a == plain.act(o)
+            nxt, r, done, _ = env.step(a)
+            slow.update(o, a, r)
+            plain.update(o, a, r)
+            o = nxt

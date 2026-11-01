@@ -72,3 +72,26 @@ def test_show_state_comparison_rows():
     rows = evaluate_shift.show_state_deltas(res)
     assert {r["algo"] for r in rows} == {"LinUCB", "LinTS"}
     assert "Gain" in evaluate_shift.table_show_state(res)
+
+
+def test_pick_kappa_follows_the_preset_rule():
+    from sim.evaluate_shift import pick_kappa, two_ts_name
+    def length(gains, steadies):
+        curve = {"LinUCB": [0.5] * 8}
+        steady = {"LinUCB": [0.9] * 8}
+        for k, g, st in zip((0.5, 1, 2, 4, 8), gains, steadies):
+            curve[two_ts_name(k)] = [0.5 + g] * 8
+            steady[two_ts_name(k)] = [0.9 + st] * 8
+        return {"shift_at": 4, "curve": curve, "steady_curve": steady}
+    res = {"8": length([0.10, 0.08, 0.06, 0.02, 0.01], [-0.05, -0.005, 0.0, 0.0, 0.0]),
+           "16": length([0.09, 0.07, 0.05, 0.03, 0.01], [-0.04, 0.0, 0.0, 0.0, 0.0])}
+    assert pick_kappa(res) == 1        # 0.5 fails steady; 1 passes both lengths with the larger gain
+    none = {"8": length([0.01] * 5, [0.0] * 5)}
+    assert pick_kappa(none) is None
+
+
+def test_behaviour_diagnostic_rates():
+    res = evaluate_shift.run_behaviour(names=("LinUCB", "random"), shows=8, seeds=1)
+    for r in res.values():
+        assert 0 <= r["repeat_rate"] <= 1 and 0 <= r["hurt_pick_rate"] <= 1
+    assert "Repeats" in evaluate_shift.table_behaviour(res)

@@ -115,6 +115,7 @@ How to read the numbers (laughs per show, laughs lost vs oracle, cold start, CI)
 | Mid-set preference shift | Laughs after the shift (% of oracle); bits to recover | Done (shift PR) | Learners fall from 95% to 80–83% of oracle and recover no faster than random; a bandit reads rooms, not turns → needs show state (MDP) |
 | Set length vs shift | Choice quality after the shift, 8–52-bit sets | Done (notebook Exp 6) | Longer sets don't help: quality stays ~0.15 below steady even 26 bits after the turn |
 | Show state A: tonight's record as features | Choice quality after shift / in steady shows | Done (notebook Exp 7) | Fails pre-set criteria (+0.01–0.05 after a turn, −0.01–0.03 when steady): hedges, doesn't read the turn |
+| Show state B: career + tonight's correction (κ sweep) | Choice quality after shift / steady; repeat and hurt-pick rates | Done (notebook Exp 8) | No κ passes: win-stay meets fatigue (repeats 29% → 54%) and untried modes are never tested → C needs in-show exploration + fatigue planning |
 | Callbacks: greedy vs sequential | Late-set laugh rate, laughs lost | Planned (explore-next #5) | |
 | Prior strength sweep | Laughs lost vs prior weight | Planned (explore-next #7) | |
 | Human vs LLM-judge mode ranking | Rank correlation, rJokes upvotes vs HumorGen | Blocked on Explorer labels | |

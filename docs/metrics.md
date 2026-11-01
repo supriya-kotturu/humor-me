@@ -202,3 +202,28 @@ greedy). 30,000 jokes from `train.jsonl` (seed 0) in ~1.6 h at 5.2 jokes/s; 11 p
 3. **Spread between modes is small:** 0.47–0.53 in percentile, with wordsmith clearly last
    (also last in HumorGen's judge ranking). Not yet comparable to the judge ranking: that needs
    the year/length-matched pairs of explore-next #1, and a hand check of 100 labels first.
+## PR: show state, step B (2026-10-31)
+
+`evaluate_shift.run_lengths(lengths=[8, 16], total_bits=3200, seeds=10, names=TWO_TS_POLICIES)`
+(notebook Exp 8; ~4 min) and `run_behaviour(...)` (3 careers). Raw:
+`reports/metrics/show_state_b.json`, `show_state_b_behaviour.json`; figure `reports/figures/show_state_b.png`.
+
+| Set | κ | Shifted gain (need ≥ +0.05) | Steady change (need ≥ −0.01) | Pass |
+|---|---|---|---|---|
+| 8 | 0.5 / 1 / 2 / 4 / 8 | −0.023 / −0.023 / −0.011 / −0.013 / −0.021 | −0.029 / −0.030 / −0.015 / −0.012 / +0.005 | none |
+| 16 | 0.5 / 1 / 2 / 4 / 8 | −0.029 / −0.015 / −0.024 / −0.015 / +0.009 | −0.043 / −0.043 / −0.024 / −0.010 / −0.005 | none |
+
+| Policy | Repeats the last bit's mode | After a shift, picks a hurt mode |
+|---|---|---|
+| LinUCB | 29% | 51% |
+| B, κ = 1 | 54% | 48% |
+| B, κ = 8 | 40% | 55% |
+
+**Findings**
+1. **No κ passes; B is not adopted.** Small κ chases noise even before the shift (pre-shift
+   quality 0.944 → 0.919 at κ = 1).
+2. **Win-stay meets fatigue:** trusting tonight nearly doubles repeats, and the room tires of them.
+3. **It learns what bombed, not what's now good:** untried modes get no correction, so hurt modes
+   keep getting picked after a turn.
+4. **What C needs:** in-show exploration (value of trying an untried mode) and planning around
+   fatigue, i.e. a sequential policy rather than a per-bit correction.

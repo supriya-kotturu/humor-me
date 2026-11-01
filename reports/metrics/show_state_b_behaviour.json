@@ -1,0 +1,5 @@
+{"params": {"names": ["LinUCB", "LinUCB + tonight \u03ba=1", "LinUCB + tonight \u03ba=8"], "seeds": 3, "shift_at": 4, "shows": 400}, "results": {
+  "LinUCB": {"repeat_rate": 0.2914285714285714, "hurt_pick_rate": 0.5071942446043165},
+  "LinUCB + tonight \u03ba=1": {"repeat_rate": 0.5395238095238095, "hurt_pick_rate": 0.4766187050359712},
+  "LinUCB + tonight \u03ba=8": {"repeat_rate": 0.4023809523809524, "hurt_pick_rate": 0.5485611510791367}
+}}

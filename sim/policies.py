@@ -146,13 +146,49 @@ class LinUCB(_Linear):
         super().__init__(prior, **kw)
         self.alpha = alpha
 
-    def act(self, obs):
-        scores = []
+    def scores(self, obs) -> np.ndarray:
+        """Per mode: (predicted reward, exploration bonus). Split so a wrapper can correct the
+        prediction without touching the bonus."""
+        out = []
         for a in range(len(self.A)):
             x = self._x(obs, a)
             A_inv = np.linalg.inv(self.A[a])
-            scores.append(A_inv @ self.b[a] @ x + self.alpha * math.sqrt(x @ A_inv @ x))
-        return int(np.argmax(scores))
+            out.append((A_inv @ self.b[a] @ x, self.alpha * math.sqrt(x @ A_inv @ x)))
+        return np.array(out)
+
+    def act(self, obs):
+        s = self.scores(obs)
+        return int(np.argmax(s[:, 0] + s[:, 1]))
+
+
+class TwoTimescale:
+    """Show state step B: career model + a per-show correction that resets every show.
+
+    After each bit, the surprise (reward − the career model's prediction for that mode) is kept
+    for tonight. A mode's correction = its total surprise tonight / (bits it had tonight + kappa).
+    kappa is "how slowly to believe tonight", in bits: small = trust tonight after one bit,
+    large = need many bits before tonight outweighs the career. The career model keeps learning
+    from every bit as before.
+    """
+
+    def __init__(self, base: LinUCB, kappa: float):
+        self.base, self.kappa = base, kappa
+        self._surprise: dict[int, list[float]] = {}
+
+    def correction(self, n_modes: int) -> np.ndarray:
+        return np.array([sum(self._surprise.get(a, ())) / (len(self._surprise.get(a, ())) + self.kappa)
+                         for a in range(n_modes)])
+
+    def act(self, obs):
+        if obs["t"] == 0:  # new show: tonight starts with no evidence
+            self._surprise = {}
+        s = self.base.scores(obs)
+        return int(np.argmax(s[:, 0] + s[:, 1] + self.correction(len(s))))
+
+    def update(self, obs, action, reward):
+        predicted = self.base.scores(obs)[action, 0]
+        self._surprise.setdefault(action, []).append(reward - predicted)
+        self.base.update(obs, action, reward)
 
 
 class LinTS(_Linear):

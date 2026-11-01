@@ -14,10 +14,10 @@ Learning the material from scratch (RL foundations → our experiments → Explo
 | **RL simulator** | Done: `sim/env.py` (room's truth in `sim/audience.yaml`), director decides **per bit** (8 bits × 5 jokes) |
 | **Director policy** | **LinUCB + uniform prior**: 97% of oracle, +18% vs always-Neurotic (notebook Exp 4) |
 | Within-show adaptation | Open problem: the director reads rooms, not a room *turning* (Exp 5: 95% → 80% of oracle after a mid-set shift; Exp 6: longer sets don't help) |
-| Show state (A → B → C) | **A** (tonight's record as features): not adopted, hedges (Exp 7). **B** (two timescales, speed sweep): next. **C** (MDP + callbacks): week 6 |
-| Decision notebook | Exp 1–7, 24/24 claim checks ✅. Run `python scripts/run_notebook.py` before committing it |
+| Show state (A → B → C) | **A** (tonight's record as features): not adopted, hedges (Exp 7). **B** (career + tonight's correction): not adopted, no speed passes (Exp 8). **C** (MDP + callbacks, with in-show exploration and fatigue planning): next |
+| Decision notebook | Exp 1–8, all claim checks ✅. Run `python scripts/run_notebook.py` before committing it |
 | Tests | `.venv/Scripts/python -m pytest tests -q`: 100 passing, synthetic data only |
-| rJokes | R1 prep done (403k jokes). **R2 first 30k labeled** (job 11534420, ~1.6 h, 11 parse failures); `modes.jsonl` copied to the laptop. **Precision rule not met:** optimist has only 399 jokes (±0.029) → extend ([metrics.md](metrics.md#r2-rjokes-mode-labels-2026-10-31)) |
+| rJokes | R1 prep done (403k jokes). **R2 first 30k labeled** (job 11534420, ~1.6 h, 11 parse failures); `modes.jsonl` copied to the laptop. **Precision rule not met:** optimist has only 399 jokes (±0.029) → extend ([metrics.md](metrics.md#pr-20-rjokes-mode-labels-r2-first-30k-2026-10-31)) |
 | Explorer (NEU HPC) | Working env: Python 3.13 module, `torch==2.5.1+cu121`, `transformers` 4.57, V100 in float16, 5.2 jokes/s in batch ([explorer/README.md](../explorer/README.md)) |
 | Transcript pipeline | **Paused 2026-10-26**. Bits F1 0.80 on Bargatze; kept for structure stats + report appendix |
 | Report | [report.md](report.md): overview written (user + AI), results table filled for Exp 1–7 |
@@ -28,8 +28,7 @@ Learning the material from scratch (RL foundations → our experiments → Explo
 
 | PR | What |
 |---|---|
-| #19 | Show state step B: tonight's correction can't read a turn without exploration |
-| this | R2 labeling result (first 30k) |
+| – | none (#16–#20 merged) |
 
 ## Models and providers
 
@@ -52,16 +51,16 @@ Learning the material from scratch (RL foundations → our experiments → Explo
 
 ## Next steps
 
-1. **Show state step B** (two timescales: career estimate + fast per-show correction), sweeping
-   "how fast to believe tonight"; adopt a speed only if it passes both criteria (shifted-show
-   gain ≥ 0.05, steady-show change ≥ −0.01). Notebook Exp 8.
+1. **Show state step C** (MDP over bits + callbacks): step B showed a per-bit correction learns
+   what bombed but never tries untried modes, and trusting tonight repeats modes into fatigue.
+   C needs in-show exploration and fatigue planning (decisions.md 2026-10-31). Notebook Exp 9.
 2. **Extend R2** (precision rule): `N=60000 sbatch explorer/label_modes.sbatch` resumes and
    labels the next 30k. At optimist's 1.3% share, 60k gives ~800 optimist jokes, right at the
    ±0.02 edge, so a third extension may follow. Meanwhile hand-check 100 labels, then the
    human-vs-judge mode ranking (explore-next #1).
 3. **Demo track from Monday Nov 2:** voice loop → waveform UI → operator laugh button (roadmap
    weeks 3–4), then laugh detection (week 5).
-4. Week 6: step C (MDP + callbacks) with the final sim figures.
+4. Week 6: final sim figures for the report.
 
 Parked: transcript callback pass, Birbiglia held-out run, `pipeline.bits --all`.
 Backlog: [explore-next.md](explore-next.md).

@@ -185,3 +185,25 @@ rather than reads the turn: the curve doesn't climb afterwards, and steady shows
 Why: one linear weight on "tonight's mean" has to serve both shifted and steady rooms, so it
 settles on a compromise. Next: step B, where tonight's correction is explicit and per show.
 Evidence: notebooks/decisions.ipynb Exp 7; metrics.md "show state step A".
+
+## 2026-10-31 — Sim `base`: HumorGen win rates mapped linearly (retroactive record)
+Formula: `base = 0.3 + 2 * (win_rate - 0.5)` (sim/audience.yaml), turning Table 4's six
+LLM-judge win rates into the room's general mode strengths (neurotic 0.57 ... wordsmith 0.00).
+Picked by hand by the AI (Claude) when writing PR #1 (2026-10-27); the user approved "start by
+hand, swap in rJokes in PR 3". No options were compared then; this entry records it after the
+fact. What each constant does (sim: laugh when latent > 0, noise sd 1, so P(laugh) ~ Phi(mean)):
+- `- 0.5`: centres an average persona at 0; a win rate is only relative to the field.
+- `* 2`: spread best-worst = 0.57, about half the noise sd and the same size as the venue
+  offsets (+-0.4), so a venue can flip the best mode. A much larger slope (e.g. 10: spread 2.8)
+  makes neurotic best everywhere, so fixed-neurotic is unbeatable and nothing is learned; a
+  slope near 0 leaves only the made-up venue offsets.
+- `+ 0.3`: an average mode gets Phi(0.3) ~ 62% laugh chance fresh. It also happens to cancel
+  the steady-state fatigue of -0.3, but that fatigue came later (per-bit decisions, same day);
+  it was not the reason.
+Linear because six judge numbers only support "order and rough gaps". Alternative not taken:
+the Thurstone mapping `sqrt(2) * sigma * Phi^-1(win_rate)` (sigma = 1: neurotic +0.48,
+wordsmith -0.55, about twice the spread), principled for pairwise data but its sigma is the
+judge's noise, not the room's, so it adds rigor the inputs can't back. Superseded when PR 3
+replaces `base` with rJokes per-mode upvote percentiles, which need their own mapping (decide
+centre, scale and offset again; percentiles are not win rates).
+Evidence: PR #1 transcript and code; metrics.md PR #1 (best vs runner-up gaps 0.015-0.052).

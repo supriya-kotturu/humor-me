@@ -1,0 +1,8 @@
+# Explorer (NEU HPC) venv for the labeling job: the combination verified on 2026-10-31.
+# Python: module python/3.13.5. Driver: CUDA <= 12.3. GPU: V100-SXM2 (float16; no bfloat16).
+# Install: uv pip install -r explorer/requirements-cluster.txt --index-strategy unsafe-best-match
+# Do NOT add vllm (needs a newer driver, drops Volta) or torchvision (a mismatched build breaks
+# transformers' model imports).
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch==2.5.1+cu121
+transformers>=4.56,<5

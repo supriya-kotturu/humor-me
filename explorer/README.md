@@ -15,47 +15,74 @@ are **deleted after final grades**: copy results back to the laptop after every 
 
 - A `courses-gpu` session idle for ~1 h gets an email, then is killed. Long runs go through
   `sbatch`, not an open notebook.
-- 12 GB system RAM: fine for vLLM on a 7B model (weights stream to the GPU), not for loading
-  all 400k jokes into pandas next to it. The script reads only the sample.
-- One GPU job at a time: don't keep a JupyterLab GPU session open while a GPU batch job runs.
-- GPU type varies by node: `sinfo -p courses-gpu --Format=nodes,cpus,gres,statecompact`.
-  On a 16 GB card (T4/P100/V100-16) use `MODEL=Qwen/Qwen2.5-3B-Instruct`.
+- 12 GB system RAM: enough for a 7B model (weights go to the GPU), not for loading all 400k
+  jokes next to it. The script reads only the sample.
+- One GPU job at a time: free an interactive GPU session before `sbatch`.
+- **GPUs:** `courses-gpu` has **V100-SXM2 (32 GB)** and **P100 (12 GB)** nodes
+  (`sinfo -p courses-gpu --Format=nodes,gres:40,statecompact`). Neither supports bfloat16, so
+  models load in float16 (`--dtype half`). The job requests a V100.
+- **Driver supports CUDA ≤ 12.3** (`found version 12030`), so PyTorch must be a **cu121** build.
+  Current vLLM needs newer drivers and drops Volta, so the job uses plain `transformers`
+  (`--backend transformers`, the default).
+- **Login node (`explorer-0X`) is for light work only** (git, editing, `sbatch`): it killed a 1-minute
+  data-prep step. Anything heavy runs where the prompt shows a compute node (`cNNNN`/`dNNNN`).
 
-## One-time setup (CPU is enough)
+## The environment that works (2026-10-31)
 
-Works from any terminal: **OOD → Clusters → Explorer Shell Access** (no JupyterLab needed; the
-"JupyterLab ML Courses" app showed "does not supply a sub app form file" on 2026-10-31, and its
-built-in env has no vLLM anyway). Don't install on the login node; take a CPU session first:
+| Piece | Version | Why |
+|---|---|---|
+| Python | `module load python/3.13.5` | Default `python3` is 3.9: too old for current ML libraries. uv couldn't download its own 3.12 (GitHub transfers timed out) |
+| Installer | `uv` (installed with the 3.13 module's pip) | Much faster than pip on network storage, with visible progress |
+| PyTorch | `torch==2.5.1+cu121` | Matches the CUDA 12.3 driver |
+| transformers | `>=4.56,<5` (4.57.6 tested) | 5.x needs a newer torch than 2.5 |
+| **Not installed** | vLLM, torchvision, torchaudio | vLLM can't run here; torchvision leftovers break `transformers` imports |
+
+Exact list: [requirements-cluster.txt](requirements-cluster.txt). `explorer/env.sh` loads the module,
+activates the venv and sets `HF_HOME`/`UV_CACHE_DIR` in the course dir.
+
+## One-time setup
+
+Use **OOD → Clusters → Explorer Shell Access** (the "JupyterLab ML Courses" app fails with "does not
+supply a sub app form file"). Run installs as **batch jobs**: they survive a closed browser, and
+interactive sessions were killed mid-install by their time limit. **Paste each command as one
+line**: a blank line after a trailing backslash makes `sbatch` wait for a script on stdin.
+
 ```bash
-srun -p courses --cpus-per-task=4 --mem=16G --time=01:00:00 --pty bash
-export COURSE_DIR=/courses/CS5180.202710/students/$USER   # term 202710 = Fall 2026
+# login node: clone and get uv (light work)
+export COURSE_DIR=/courses/CS5180.202710/students/$USER          # term 202710 = Fall 2026
 cd $COURSE_DIR && git clone https://github.com/supriya-kotturu/humor-me.git && cd humor-me
-python3 --version                            # default was 3.9 (2026-10-31); scripts are 3.9-safe
-python3 -m venv $COURSE_DIR/venv && source $COURSE_DIR/venv/bin/activate
-pip install vllm                             # 10–20 min on network storage; wait for "Successfully installed"
-python -c "import vllm, sys; print(vllm.__version__, sys.version)"   # must import cleanly
-exit                                         # release the CPU session
+module load python/3.13.5 && python3 -m pip install --user uv && module unload python/3.13.5
+export PATH=$HOME/.local/bin:$PATH && mkdir -p logs
+
+# venv + packages, as a batch job (~5 min); then read logs/setup-<id>.out
+sbatch -p courses --cpus-per-task=4 --mem=32G --time=01:00:00 -o logs/setup-%j.out --wrap 'module load python/3.13.5; export UV_CACHE_DIR=$COURSE_DIR/uv-cache; uv venv --clear --python "$(which python3)" $COURSE_DIR/venv && source $COURSE_DIR/venv/bin/activate && uv pip install -r explorer/requirements-cluster.txt --index-strategy unsafe-best-match && python -c "import torch, transformers; from transformers import Qwen2ForCausalLM; print(torch.__version__, transformers.__version__, torch.cuda.is_available())"'
 ```
-If `import vllm` fails on 3.9, rebuild with a newer Python: `module avail python`, `module load`
-a 3.10–3.12, then repeat the venv lines. Typing while pip runs queues the input; it runs after.
+The log's last line should be `2.5.1+cu121 4.57.x False` (`False` is right: no GPU on a CPU node).
 
-Copy `data/processed/rjokes/train.jsonl` (gitignored; joke text never goes into git) to the
-same path inside the clone: OOD **Files** → `$COURSE_DIR/humor-me/data/processed/rjokes/` → Upload,
-or `scp`.
-
-**GPU smoke test without JupyterLab:**
+**Data:** `train.jsonl` is gitignored. Rebuild it on a compute node instead of uploading. It's
+deterministic, so the joke ids match the laptop's (check `after_length: 402981`):
 ```bash
-srun -p courses-gpu --gres=gpu:1 --cpus-per-task=4 --mem=12G --time=00:30:00 --pty bash
-cd /courses/CS5180.202710/students/$USER/humor-me && source explorer/env.sh && nvidia-smi
-python explorer/label_modes.py --input data/processed/rjokes/train.jsonl --n 50 --out /tmp/smoke.jsonl
-exit                                         # one GPU job at a time: free it before sbatch
+srun -p courses --cpus-per-task=2 --mem=16G --time=00:30:00 --pty bash
+cd $COURSE_DIR/humor-me && git clone --depth 1 https://github.com/orionw/rJokesData data/external/rJokesData
+module load python/3.13.5 && python3 -m pipeline.rjokes && exit
 ```
+
+**GPU smoke test** (50 jokes; the first run also downloads the 7B model, ~15 GB, in < 1 min):
+```bash
+srun -p courses-gpu --gres=gpu:v100-sxm2:1 --cpus-per-task=4 --mem=12G --time=00:30:00 --pty bash
+cd /courses/CS5180.202710/students/$USER/humor-me && source explorer/env.sh
+python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+python explorer/label_modes.py --input data/processed/rjokes/train.jsonl --n 50 --out /tmp/smoke.jsonl --dtype half
+head -3 /tmp/smoke.jsonl && exit
+```
+Measured 2026-10-31: `True Tesla V100-SXM2-32GB`; **50/50 labeled, 3.4 jokes/s, 0 parse failures**
+(→ ~2.5 h for 30k). The "generation flags are not valid" warning is expected: decoding is greedy.
 
 ## Runs
 
 | Step | How | Output |
 |---|---|---|
-| Smoke test (interactive) | OOD JupyterLab on `courses-gpu`, terminal: `source explorer/env.sh && python explorer/label_modes.py --input data/processed/rjokes/train.jsonl --n 50 --out /tmp/smoke.jsonl`. **Then stop the session.** | Throughput, parse failures |
+| Smoke test (interactive) | See "GPU smoke test" above. **Then `exit` the session.** | Throughput, parse failures |
 | Full labeling (batch) | `mkdir -p logs && sbatch explorer/label_modes.sbatch` (override: `N=5000 MODEL=... sbatch ...`) | `data/processed/rjokes/modes.jsonl` (ids + labels, no text) |
 | Monitor / cancel | `squeue -u $USER`, `tail -f logs/humor-label-<id>.out`, `scancel <id>` | |
 | **Interrupted?** (time limit, node failure, `scancel`) | Submit the **same** command again. It skips ids already in `modes.jsonl` (checkpointed every 2,000 jokes) and continues, on whatever node it gets | Same file, grows |

@@ -107,6 +107,49 @@ def chunks(items: list, size: int):
         yield items[i:i + size]
 
 
+def length_order(texts: list[str]) -> list[int]:
+    """Indices sorted by length, so each generation batch pads to similar lengths (less wasted compute)."""
+    return sorted(range(len(texts)), key=lambda i: len(texts[i]))
+
+
+def make_generator(args):
+    """Return generate(convs) -> list of reply texts, in input order. Heavy imports happen here so
+    --help and the resume check run without a GPU."""
+    if args.backend == "vllm":
+        from vllm import LLM, SamplingParams
+
+        llm = LLM(model=args.model, max_model_len=args.max_model_len, seed=args.seed, dtype=args.dtype)
+        params = SamplingParams(temperature=0.0, max_tokens=120)
+        return lambda convs: [o.outputs[0].text for o in llm.chat(convs, params)]
+
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    dtype = {"half": torch.float16, "bfloat16": torch.bfloat16}.get(args.dtype)
+    if dtype is None:  # auto: bfloat16 only where the GPU supports it (not V100/P100)
+        dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    tok = AutoTokenizer.from_pretrained(args.model, padding_side="left")  # left: generation continues each row's end
+    # `dtype=` (transformers ≥ 4.56; `torch_dtype` is gone in 5.x, which the cluster has)
+    model = AutoModelForCausalLM.from_pretrained(args.model, dtype=dtype).to("cuda").eval()
+    torch.manual_seed(args.seed)
+
+    def generate(convs):
+        texts = [tok.apply_chat_template(c, tokenize=False, add_generation_prompt=True) for c in convs]
+        replies = [""] * len(texts)
+        order = length_order(texts)
+        for i in range(0, len(order), args.batch_size):
+            idx = order[i:i + args.batch_size]
+            enc = tok([texts[j] for j in idx], return_tensors="pt", padding=True).to("cuda")
+            with torch.no_grad():
+                out = model.generate(**enc, max_new_tokens=120, do_sample=False,
+                                     pad_token_id=tok.pad_token_id or tok.eos_token_id)
+            for j, reply in zip(idx, tok.batch_decode(out[:, enc["input_ids"].shape[1]:], skip_special_tokens=True)):
+                replies[j] = reply
+        return replies
+
+    return generate
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", required=True)
@@ -116,6 +159,12 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--chunk", type=int, default=2000, help="jokes per checkpoint")
     ap.add_argument("--max-model-len", type=int, default=2048)
+    # V100/P100 have no bfloat16 (Qwen's default); vLLM refuses to start unless told "half".
+    ap.add_argument("--dtype", default="auto", help="auto | half | bfloat16 (use half on V100)")
+    # Explorer's driver supports CUDA ≤ 12.3 and its GPUs are V100/P100: current vLLM builds need
+    # newer drivers and drop Volta, so plain transformers + a cu121 torch is the default there.
+    ap.add_argument("--backend", default="transformers", choices=["transformers", "vllm"])
+    ap.add_argument("--batch-size", type=int, default=16, help="transformers backend: prompts per forward pass")
     args = ap.parse_args()
 
     out = pathlib.Path(args.out)
@@ -128,18 +177,14 @@ def main() -> None:
     if not todo:
         return
 
-    from vllm import LLM, SamplingParams  # imported late so --help and resume checks work without a GPU
-
-    llm = LLM(model=args.model, max_model_len=args.max_model_len, seed=args.seed)
-    params = SamplingParams(temperature=0.0, max_tokens=120)
+    generate = make_generator(args)
     t0, labeled, failed = time.time(), 0, 0
     for batch in chunks(todo, args.chunk):
         convs = [[{"role": "system", "content": SYSTEM},
                   {"role": "user", "content": PROMPT.replace("{joke}", r["text"])}] for r in batch]
-        outs = llm.chat(convs, params)
+        outs = generate(convs)
         with open(out, "a", encoding="utf-8") as f:
-            for r, o in zip(batch, outs):
-                text = o.outputs[0].text
+            for r, text in zip(batch, outs):
                 lab = parse(text)
                 rec = {"id": r["id"], "score": r["score"], "pct": r["pct"], "model": args.model, "seed": args.seed}
                 if lab:

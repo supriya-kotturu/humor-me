@@ -1,0 +1,9 @@
+n,joke,judge_mode,verdict,human_mode,what_it_shows,upvote_pct,year,id
+2,"My Grandpa's last words to me were ""Wanna see how far I can kick this bucket?""",absurdist,y,absurdist,Agreement,0.4842,2017,83aec46659d4
+90,My teacher told me I'd never be good at poetry because I'm dyslexic But so far I've made three jugs and a vase and they're lovely,optimist,y,optimist,Agreement on the rarest mode,0.9206,2019,89fcc693bc7d
+97,What do you call a dictator running a bookshop? The Supreme Reader.,wordsmith,y,wordsmith,Agreement,0.8336,2016,dc05a751b783
+38,What were the final words of the man stuck in a spring? The tension is killing me.,neurotic,n,wordsmith,Pun filed under its surface topic (tension),0.1342,2019,372273970a8b
+57,Wanna hear a joke about ghosts? That's the spirit.,none,n,wordsmith,Pun missed entirely,0.8209,2018,25f0abd66125
+71,"Well, well, well... That's three holes in the ground.",observer,n,wordsmith,Pun filed under its setup,0.6712,2018,8190ea6293be
+78,I doubt vodka is the answer.... But it's worth a shot,optimist,n,wordsmith,Pun read as a positive spin,0.9605,2017,b0e2a39ff214
+1,"a horse, a pediatrician and a fish walk into a bar the horse stands in place, the fish dies and pediatrician just missed his shift",absurdist,?,,"Joke didn't land, no mode assignable",0.1342,2019,a34e6d97985e

@@ -1,0 +1,48 @@
+# Bit-boundary labeling: invented_robot-set
+#
+# A bit = the smallest unit that works ON ITS OWN without earlier setup (premise + its tags).
+# Consecutive bits on the same topic form a THREAD: mark the later ones with >>> continues.
+# A callback returns to an earlier bit AFTER other material; it starts a NEW bit.
+# Crowd-work exchanges are their own bit.
+#
+# HOW: put a line with only >>> directly ABOVE the first line of each new bit.
+#      Optional note after it, e.g.  >>> the dentist
+#      SAME TOPIC as the previous bit:  >>> continues: the dentist
+#      BOTH (same topic + calls back):   >>> continues callback 0042: the dentist
+#      CALLBACK: on the LATER bit, name the line where the earlier bit starts:
+#          >>> callback 0042: the dentist
+#      (a callback bit starts where its SETUP starts, not at the payoff line)
+#      LINE CALLBACK: one line inside an ordinary bit that refers back; put directly above it:
+#          @callback 0189: the front door      (number = the earlier line it refers to)
+#      Test: delete the reference; is the stretch still a bit? yes -> @callback, no -> >>> callback
+#      The first line of the set is always a bit start; no need to mark it.
+#      ⟨L2⟩ etc. show the laugh that followed a line (context only, don't edit them).
+#      Don't edit or reorder the [NNNN] lines. Save, then run:
+#          python -m pipeline.labels import invented_robot-set
+#
+[0000] Hi, I'm a robot, and I'm already nervous about this.
+[0001] They gave me a microphone. I am a microphone. This feels redundant.  ⟨L2⟩
+[0002] My therapist says I overthink. She's a toaster, so she under-thinks.  ⟨L2⟩
+>>> online dating
+[0003] Last week I tried online dating.
+[0004] My profile said 'enjoys long walks.' I meant firmware updates.  ⟨L2⟩
+[0005] She asked what I do for fun. I said, 'Compute.' She said, 'Compute what?' Exactly.  ⟨L3⟩
+>>> continues: online dating
+[0006] Second date, she asked to meet my family.
+[0007] I introduced her to the router. It disconnected. Like Dad.  ⟨L4⟩
+>>> airports
+[0008] Anyway, airports.
+[0009] Security asked me to remove all electronics from my bag. I removed myself from the bag.  ⟨L2⟩
+[0010] The scanner beeped. I said, 'Sorry, that's my personality.'  ⟨L2⟩
+[0011] Then the gate agent asked if I'd like to upgrade.
+@callback 0002: the toaster therapist
+[0012] I said, 'Please. My last update was a toaster's opinion.'  ⟨L3⟩
+>>> continues: airports, on the plane
+[0013] On the plane they said to switch to airplane mode.
+[0014] I did. Now I think I'm a plane. The pilot is very nervous.  ⟨L2⟩
+>>> crowd work: accountant
+[0015] Is anyone here good with numbers? Yes, sir. What do you do?
+[0016] An accountant! Finally, someone else who computes for fun.  ⟨L3⟩
+[0017] Do you also get anxious when the spreadsheet doesn't balance? Same. That's my whole life.  ⟨L2⟩
+>>> callback 0003: online dating
+[0018] And my date? She's still waiting for me to compute something.  ⟨L4⟩

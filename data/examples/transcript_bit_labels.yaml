@@ -1,0 +1,24 @@
+set_id: invented_robot-set
+unit: line_idx
+n_lines: 19
+bit_starts:
+- line: 0
+- line: 3
+  note: online dating
+- line: 6
+  continues: true
+  note: online dating
+- line: 8
+  note: airports
+- line: 13
+  continues: true
+  note: airports, on the plane
+- line: 15
+  note: 'crowd work: accountant'
+- line: 18
+  callback_to: 3
+  note: online dating
+line_callbacks:
+- line: 12
+  callback_to_line: 2
+  note: the toaster therapist

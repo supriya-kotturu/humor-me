@@ -20,10 +20,17 @@ files are committed, and they hold counts and marker strings, no transcript text
 |---|---|---|
 | `labels/work/<set>.txt` | no | Numbered lines with laugh tags; you type `>>>` above each bit start. Never overwritten. |
 | `labels/<set>.yaml` | **yes** | Bit-start line indices + your notes, no transcript text |
+| `labels/rjokes_hand_check.csv` | **yes** | 105 rJokes ids: judge mode/flags vs your verdict, mode and safety flags, no joke text |
 
 Marks: `>>>` new bit · `>>> continues: note` same topic as the previous bit (thread) · `>>> continues callback NNNN: note` both · `>>> callback NNNN: note` callback bit (starts at its setup; NNNN = earlier bit's start) · `@callback NNNN: note` one line inside a bit referring back (NNNN = the earlier line). Test: delete the reference; still a bit? yes → `@callback`, no → `>>> callback`.
 
 `python -m pipeline.labels template <set>` → edit → `python -m pipeline.labels import <set>`.
+
+## Examples for the report (`examples/`)
+
+Small, committed samples that show *how* the hand labeling was done, since the real work files
+can't be published (transcripts: copyright; rJokes: Reddit terms, decisions.md 2026-10-31).
+See [examples/README.md](examples/README.md).
 
 ## Two datasets that grow independently
 

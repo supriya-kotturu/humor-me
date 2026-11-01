@@ -89,7 +89,7 @@ Laughs per show (40 jokes, sum of 0–3 levels), mean ± 95% CI over careers.
 4. **Chosen: LinUCB + uniform prior**: lowest total loss with the tightest CI, and no LLM-judge
    taste built in. Prior strength sweep logged as explore-next #7.
 
-## PR: mid-set preference shift (2026-10-28)
+## PR #10: mid-set preference shift (2026-10-28)
 
 `python -m sim.evaluate_shift` (10 careers × 400 shows; in a random half of shows the room's
 taste shifts after bit 4 of 8, unannounced; metrics from the last 100 shows; ~2 min).
@@ -121,7 +121,7 @@ first picks a (near-)best mode again (regret < 0.02/bit), capped at 4.
    problem, the same step callbacks require.
 4. LinTS edges LinUCB after a shift (19.7 vs 19.1), but the CIs overlap: no reason to switch.
 
-## PR: set length vs mid-set shift (2026-10-28)
+## PR #12: set length vs mid-set shift (2026-10-28)
 
 `evaluate_shift.run_lengths(lengths=[8, 16, 32, 52], total_bits=3200, seeds=10)` (notebook Exp 6;
 ~4.5 min). Shift at the midpoint; same 3,200 bits of experience per career, so longer sets =
@@ -153,7 +153,7 @@ Figure: `reports/figures/shift_recovery_by_set_length.png`.
    sticks with its old favorite, takes 14. Choice-quality curves are the honest measure.
 4. Same root cause as the shift experiment: no memory of *this* show → needs show state.
 
-## PR: show state, step A (2026-10-28)
+## PR #13: show state, step A (2026-10-28)
 
 `evaluate_shift.run_lengths(lengths=[8, 16], total_bits=3200, seeds=10, names=SHOW_STATE_POLICIES)`
 (notebook Exp 7; ~4 min). Raw: `reports/metrics/show_state_a.json`; figure:
@@ -173,36 +173,7 @@ Figure: `reports/figures/shift_recovery_by_set_length.png`.
 3. Why: a single learned weight on "tonight's mean" serves shifted and steady rooms alike, so it
    compromises. Step B makes the per-show correction explicit.
 
-## R2: rJokes mode labels (2026-10-31)
-
-`sbatch explorer/label_modes.sbatch` (job 11534420, V100-SXM2-32GB, Qwen2.5-7B-Instruct, fp16,
-greedy). 30,000 jokes from `train.jsonl` (seed 0) in ~1.6 h at 5.2 jokes/s; 11 parse failures
-(0.04%). Output: `data/processed/rjokes/modes.jsonl` (ids + labels, no text). Logs:
-[submit + progress](../assets/labeling/batch-labeling.png),
-[end + precision table](../assets/labeling/batch-labeling-30k.png).
-
-`pct` = upvote percentile within the joke's year (0.5 = median joke that year).
-
-| Mode | Jokes | Share | Mean pct | 95% CI ± |
-|---|---|---|---|---|
-| optimist | 399 | 1.3% | 0.530 | **0.029** |
-| neurotic | 6,321 | 21.1% | 0.525 | 0.007 |
-| observer | 3,372 | 11.2% | 0.521 | 0.009 |
-| absurdist | 3,165 | 10.6% | 0.515 | 0.010 |
-| cynic | 8,152 | 27.2% | 0.508 | 0.006 |
-| wordsmith | 8,394 | 28.0% | 0.470 | 0.006 |
-| none | 186 | 0.6% | 0.418 | 0.039 |
-
-**Findings**
-1. **Precision rule not met:** optimist's CI is ±0.029 (> ±0.02), so the sample is extended by
-   30k as fixed before the run. Needed: ~840 optimist jokes (1.96 · 0.296 / 0.02)²; at a 1.3% share,
-   60k gives ~800, so a further extension is likely.
-2. **Modes are very unevenly represented on Reddit:** wordsmith (puns) and cynic make up 55%;
-   optimist 1.3%. Sample size per mode, not total, sets precision.
-3. **Spread between modes is small:** 0.47–0.53 in percentile, with wordsmith clearly last
-   (also last in HumorGen's judge ranking). Not yet comparable to the judge ranking: that needs
-   the year/length-matched pairs of explore-next #1, and a hand check of 100 labels first.
-## PR: show state, step B (2026-10-31)
+## PR #19: show state, step B (2026-10-31)
 
 `evaluate_shift.run_lengths(lengths=[8, 16], total_bits=3200, seeds=10, names=TWO_TS_POLICIES)`
 (notebook Exp 8; ~4 min) and `run_behaviour(...)` (3 careers). Raw:
@@ -227,3 +198,33 @@ greedy). 30,000 jokes from `train.jsonl` (seed 0) in ~1.6 h at 5.2 jokes/s; 11 p
    keep getting picked after a turn.
 4. **What C needs:** in-show exploration (value of trying an untried mode) and planning around
    fatigue, i.e. a sequential policy rather than a per-bit correction.
+
+## PR #20: rJokes mode labels, R2 first 30k (2026-10-31)
+
+`sbatch explorer/label_modes.sbatch` (job 11534420, V100-SXM2-32GB, Qwen2.5-7B-Instruct, fp16,
+greedy). 30,000 jokes from `train.jsonl` (seed 0) in ~1.6 h at 5.2 jokes/s; 11 parse failures
+(0.04%). Table: `python explorer/mode_precision.py` (printed at the end of the job). Output: `data/processed/rjokes/modes.jsonl` (ids + labels, no text). Logs:
+[submit + progress](../assets/labeling/batch-labeling.png),
+[end + precision table](../assets/labeling/batch-labeling-30k.png).
+
+`pct` = upvote percentile within the joke's year (0.5 = median joke that year).
+
+| Mode | Jokes | Share | Mean pct | 95% CI ± |
+|---|---|---|---|---|
+| optimist | 399 | 1.3% | 0.530 | **0.029** |
+| neurotic | 6,321 | 21.1% | 0.525 | 0.007 |
+| observer | 3,372 | 11.2% | 0.521 | 0.009 |
+| absurdist | 3,165 | 10.6% | 0.515 | 0.010 |
+| cynic | 8,152 | 27.2% | 0.508 | 0.006 |
+| wordsmith | 8,394 | 28.0% | 0.470 | 0.006 |
+| none | 186 | 0.6% | 0.418 | 0.039 |
+
+**Findings**
+1. **Precision rule not met:** optimist's CI is ±0.029 (> ±0.02), so the sample is extended by
+   30k as fixed before the run. Needed: ~840 optimist jokes (1.96 · 0.296 / 0.02)²; at a 1.3% share,
+   60k gives ~800, so a further extension is likely.
+2. **Modes are very unevenly represented on Reddit:** wordsmith (puns) and cynic make up 55%;
+   optimist 1.3%. Sample size per mode, not total, sets precision.
+3. **Spread between modes is small:** 0.47–0.53 in percentile, with wordsmith clearly last
+   (also last in HumorGen's judge ranking). Not yet comparable to the judge ranking: that needs
+   the year/length-matched pairs of explore-next #1, and a hand check of 100 labels first.

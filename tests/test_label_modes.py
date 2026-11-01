@@ -80,3 +80,34 @@ def test_shell_scripts_have_no_literal_backslash_n():
     root = pathlib.Path(__file__).resolve().parent.parent / "explorer"
     for f in list(root.glob("*.sbatch")) + list(root.glob("*.sh")):
         assert "\\n" not in f.read_text(encoding="utf-8"), f.name
+
+
+def test_split_on_oom_halves_until_batches_fit_and_keeps_every_reply():
+    from explorer.label_modes import split_on_oom
+
+    class OOM(Exception):
+        pass
+
+    calls = []
+
+    def run(idx):
+        calls.append(len(idx))
+        if len(idx) > 2 or 7 in idx:  # batches over 2 overflow; joke 7 never fits
+            raise OOM
+        return [f"r{j}" for j in idx]
+
+    out = split_on_oom(run, list(range(8)), lambda e: isinstance(e, OOM))
+    assert sorted(out) == list(range(8))
+    assert out[7] == "" and out[0] == "r0"
+    assert max(c for c in calls) == 8 and 1 in calls
+
+
+def test_split_on_oom_reraises_other_errors():
+    import pytest
+    from explorer.label_modes import split_on_oom
+
+    def run(idx):
+        raise ValueError("not memory")
+
+    with pytest.raises(ValueError):
+        split_on_oom(run, [0, 1], lambda e: False)

@@ -227,6 +227,13 @@ Getting one 50-joke labeling smoke test to run took most of a day. In order:
 Result: V100-SXM2-32GB, float16, Qwen2.5-7B-Instruct, **3.4 jokes/s, 0/50 parse failures**.
 The working combination is pinned in `explorer/requirements-cluster.txt`.
 
+Later, during the 90k extension run:
+
+| Problem | Cause | Fix |
+|---|---|---|
+| `torch.OutOfMemoryError` at 72k/90k (tried 3.1 GB, 2.6 GB free, 4.5 GB reserved but unused) | Batches are length-sorted, so a chunk's 16 longest jokes share one batch; a few very long posts overflow 32 GB. Fragmentation made it worse | `split_on_oom`: halve the batch and retry; one joke that still doesn't fit is logged as a parse failure. `expandable_segments:True` in the sbatch. Saved chunks were safe; resubmitting resumes |
+| An `--n` extension came close to the 4 h limit (60k new jokes ≈ 3.3 h) | `--time` was sized for the first 30k | `--time=08:00:00` (courses-gpu maximum) |
+
 ---
 
 ## Tooling and environment

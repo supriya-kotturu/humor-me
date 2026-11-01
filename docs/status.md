@@ -1,58 +1,70 @@
 # Status (read this first in a new session)
 
-Last updated: 2026-10-27. Update this file whenever the state below changes.
+Last updated: 2026-10-31. Update this file whenever the state below changes.
+
+Learning the material from scratch (RL foundations → our experiments → Explorer runbook):
+[study-guide.md](study-guide.md).
 
 ## Where we are
 
 | Area | State |
 |---|---|
 | Milestone | M1 = Dec 15, 2026 (RL course final project, school demo). Plan: [roadmap.md](roadmap.md) |
-| Branch | Work up to 2026-10-27 merged to `main` (fast-forward); keep working on short-lived branches off `main` |
-| Pipeline S0–S3 | Built, tested, eyeball-checked on 20 sets. `lines.jsonl` is the laugh-predictor input |
-| Transcript pipeline | **Paused 2026-10-26** (decisions.md). Kept for aggregate structure stats + report appendix |
-| Pipeline S4+S5 (`pipeline.bits`) | Built (Gemini, one call/set). Revised prompt run on Bargatze: bits F1 0.80, threads 0.63, callbacks 0/3. Callback pass needs its own step |
-| Pipeline S6 (`pipeline.validate`) | Built. Scores bits + threads + callbacks vs hand labels and an even-spacing baseline |
-| Tests | `.venv/Scripts/python -m pytest tests -q`, 45 passing, synthetic data only |
-| Backend / frontend | Scaffold only (FastAPI echo websocket, default Next.js page) |
-| rJokes | R1 prep done (`python -m pipeline.rjokes`): 403k jokes, era-normalized `pct`. R2 labeling job ready in `explorer/`, not run |
-| Explorer (NEU HPC) | Access granted; setup steps in `explorer/README.md`, not done yet |
-| RL simulator | Env built (`sim/`, PR `feat/sim-env`); policies next (PR 2), callbacks after (PR 2b) |
+| Workflow | One feature per branch off `main`, PR reviewable in ≤ 30 min, backed by a metric; **no stacked PRs**. Every experiment is a `run()` + a section in [notebooks/decisions.ipynb](../notebooks/decisions.ipynb) |
+| **RL simulator** | Done: `sim/env.py` (room's truth in `sim/audience.yaml`), director decides **per bit** (8 bits × 5 jokes) |
+| **Director policy** | **LinUCB + uniform prior**: 97% of oracle, +18% vs always-Neurotic (notebook Exp 4) |
+| Within-show adaptation | Open problem: the director reads rooms, not a room *turning* (Exp 5: 95% → 80% of oracle after a mid-set shift; Exp 6: longer sets don't help) |
+| Show state (A → B → C) | **A** (tonight's record as features): not adopted, hedges (Exp 7). **B** (two timescales, speed sweep): next. **C** (MDP + callbacks): week 6 |
+| Decision notebook | Exp 1–7, 24/24 claim checks ✅. Run `python scripts/run_notebook.py` before committing it |
+| Tests | `.venv/Scripts/python -m pytest tests -q`: 100 passing, synthetic data only |
+| rJokes | R1 prep done (403k jokes). **R2 labeling running on Explorer** (job 11534420, 30k jokes, ~2.5 h) → `modes.jsonl` |
+| Explorer (NEU HPC) | Working env: Python 3.13 module, `torch==2.5.1+cu121`, `transformers` 4.57, V100 in float16, 3.4 jokes/s ([explorer/README.md](../explorer/README.md); PR #16) |
+| Transcript pipeline | **Paused 2026-10-26**. Bits F1 0.80 on Bargatze; kept for structure stats + report appendix |
+| Report | [report.md](report.md): overview written (user + AI), results table filled for Exp 1–7 |
+| Wiki | [docs/wiki/](wiki/README.md) + [glossary](wiki/glossary.md), mirrored to the GitHub wiki by `scripts/sync_wiki.py` after merges |
+| **Backend / frontend (demo)** | **Scaffold only.** Voice loop, waveform UI, laugh detection, safety filter, logging: not started. Biggest risk to Dec 15 |
+
+## Open PRs
+
+| PR | What |
+|---|---|
+| #16 | Explorer environment that runs (V100, transformers, cu121) + setup dev-log |
+| #17 | (user) Why the sim's mode strengths use a linear win-rate map |
 
 ## Models and providers
 
 | Use | Provider / model | Notes |
 |---|---|---|
 | Live show loop | Gemini `gemini-flash-lite-latest` (`LLM_MODEL`) | TTFT ~0.6 s measured |
-| Offline pipeline (S4/S5) | Gemini `gemini-flash-latest` (`PIPELINE_MODEL`) | Thinking model; 20–530 s per set; free tier |
-| Config | `backend/.env` (gitignored), template `backend/.env.example` | Base URL is Gemini's OpenAI-compatible endpoint |
-| Retired name | `gemini-2.5-flash` returns 404 | Use `-latest` aliases; check `GET {base}/models` |
-| Considered | Claude API (no training on API data; Haiku 5.5 for live, Opus/Sonnet 5.5 for pipeline), local 8B via Ollama on the RTX 4060 | See decisions.md 2026-10-21 |
-
-Gemini free-tier quota ran out on 2026-10-20 and was back on 2026-10-21 (daily limit). Expect
-few full-set calls per day; one Bargatze call took 1145 s.
+| Offline pipeline (S4/S5) | Gemini `gemini-flash-latest` (`PIPELINE_MODEL`) | Paused with the transcript pipeline |
+| rJokes mode/safety labels | `Qwen/Qwen2.5-7B-Instruct` via `transformers`, greedy, on Explorer V100 | `explorer/label_modes.py`; vLLM can't run on Explorer's driver/GPUs |
+| Config | `backend/.env` (gitignored), template `backend/.env.example` | Gemini's OpenAI-compatible endpoint |
+| Considered | Claude API (Haiku 5.5 live, Sonnet/Opus 5.5 offline), local 8B via Ollama on the RTX 4060 | decisions.md 2026-10-21 |
 
 ## Evaluation protocol (don't break this)
 
-- **Tuning set:** Nate Bargatze, *Hello World* (hand-labeled: 52 bits, 37 threads, 3 callbacks).
-- **Held-out test:** Mike Birbiglia, *The Old Man and the Pool*. The user is labeling it now.
-  **Do not run `pipeline.bits` on Birbiglia until the labels are imported**, and score it once
-  with the final prompt.
-- Prompt changes must be general (stand-up rules), never fitted to Bargatze.
-
-First S4 result on Bargatze (old prompt): bits F1 0.75 (P 0.89, R 0.65, Pk 0.172), threads F1
-0.61 (Pk 0.277), callbacks 0/3; baseline F1 ~0.21. Details: [dev-log.md](dev-log.md).
+- **Sim:** pass criteria for a new director variant are fixed **before** running; notebook checks
+  assert the decision (adoptions *and* rejections), so all ✅ = every decision still holds.
+- **Transcripts:** tuning set Nate Bargatze *Hello World*; held-out Mike Birbiglia *The Old Man
+  and the Pool*, scored once with the final prompt, never tuned on.
+- **rJokes precision rule:** if any mode's 95% CI on mean percentile is wider than ±0.02, extend
+  the labeled sample by 30k (`explorer/mode_precision.py`).
 
 ## Next steps
 
-Current sprint (Oct 26 – Nov 2, target ~40% of M1 Must): see roadmap.md "Sprint" table.
-1. ~~rJokes prep~~ done.
-2. **User:** Explorer setup + smoke test (`explorer/README.md`), then the 30k labeling run.
-3. Sim env + bandit policies + regret curves (can start on placeholder priors).
-4. Set planner + bit writer prototype (long-form, text only).
+1. **Show state step B** (two timescales: career estimate + fast per-show correction), sweeping
+   "how fast to believe tonight"; adopt a speed only if it passes both criteria (shifted-show
+   gain ≥ 0.05, steady-show change ≥ −0.01). Notebook Exp 8.
+2. When R2 finishes: copy `modes.jsonl` back, hand-check 100 labels, then the human-vs-judge
+   mode ranking (explore-next #1).
+3. **Demo track from Monday Nov 2:** voice loop → waveform UI → operator laugh button (roadmap
+   weeks 3–4), then laugh detection (week 5).
+4. Week 6: step C (MDP + callbacks) with the final sim figures.
 
-Parked: callback pass, Birbiglia held-out run, `pipeline.bits --all`.
+Parked: transcript callback pass, Birbiglia held-out run, `pipeline.bits --all`.
+Backlog: [explore-next.md](explore-next.md).
 
 ## Open questions
 
-- Paid Gemini tier or Claude API, to get past free-tier limits?
+- Paid Gemini tier or Claude API for the live loop, to get past free-tier limits?
 - Local 8B (Ollama) as an offline fallback for the live demo?

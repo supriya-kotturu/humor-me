@@ -61,6 +61,8 @@ laughs. A crowd-work exchange (banter with the audience) counts as its own bit.
 | **Prior** | What the director believes about each mode *before its first show*: a starting guess of each mode's reward, and how firmly it holds that guess (prior strength) | `prior_means()`, `prior_strength` |
 | **Posterior** | The belief after updating the prior with observed rewards | LinUCB/LinTS `A`, `b` |
 | **Prior strength** | How many observations' worth of weight the prior carries. Weight 1 = about one bit's worth of evidence, so data overrides it within a few shows | `prior_strength=1.0` |
+| **Win rate (per persona)** | Share of pairwise judge matches a persona's jokes won; 50% = average for the pool. HumorGen Table 4, judged by Llama-3.3-70B, not humans | Neurotic 63.4%, wordsmith 34.9% |
+| **Thurstone model** | Reads a pairwise win rate as a gap in hidden quality: P(win) = Phi(gap / (sigma*sqrt 2)). The principled way to turn win rates into scores | Alternative to the linear `base` mapping (decisions.md 2026-10-31) |
 | **HumorGen prior** | Starting guess = HumorGen's LLM-judge win rate per persona (Neurotic best). Knows nothing about venues | `prior_means(env, "humorgen")` |
 | **Uniform prior** | Every mode starts equal: "no opinion" | `prior_means(env, "uniform")` |
 | **Wrong prior** | HumorGen's values shuffled across modes: a confident but wrong starting guess, to measure what a bad prior costs | `prior_means(env, "wrong")` |
@@ -74,6 +76,14 @@ laughs. A crowd-work exchange (banter with the audience) counts as its own bit.
 | **Two timescales** (step B) | The director keeps its career model *and* a per-show correction per mode that resets each show: years of experience plus tonight's read of the room | `TwoTimescale` |
 | **Surprise** | How much better or worse a bit landed than the career model predicted for that mode: reward − prediction. Tonight's correction is built from it | `TwoTimescale.update` |
 | **κ (kappa)** | "How slowly to believe tonight", in bits: correction = tonight's total surprise ÷ (bits tonight + κ). κ = 0.5 trusts tonight after one bit; κ = 8 needs ~8 bits. Swept, then picked by the pass criteria | `TWO_TS_KAPPAS` |
+| **Reward hypothesis** | Every goal can be written as maximizing expected total reward, so whatever the reward allows (loopholes included) is what the agent learns. Why the reward is a laugh signal and not a raw laugh count (invariant 5) | |
+| **Agent state** | The summary of the show so far that the director actually chooses on. Today: context + last bit's mode and reward | `features()` |
+| **Markov property** | The agent state holds everything that matters for what happens next, so earlier history adds nothing. The director's state is *not* Markov when a room turns mid-show: same features, different outcome depending on tonight. Show state exists to fix that | |
+| **MDP (Markov decision process)** | States, actions, transition probabilities, rewards, discount. A show as an MDP: 8 steps (bits), no discount, return = total laughs, state = context + show state + open hooks. Needed once actions change the future (fatigue, callbacks) | Step C |
+| **Return** | Total reward from now to the end of the show (discounted if the task never ends) | |
+| **Value function (v, q)** | Expected return from a state (v) or from taking an action in a state (q). LinUCB's θ̂ᵀx is a one-step q estimate per mode | `LinUCB.act` |
+| **Bellman equation** | Value = immediate reward + value of the state you land in. The optimal version takes the max over next actions. A bandit drops the "state you land in" term, which is why it can't value planting a hook | Step C |
+| **UCB (optimism)** | Pick the arm with the highest plausible value: estimate + uncertainty bonus that shrinks with plays (UCB1: √(2 ln t / n) for rewards in [0, 1]). LinUCB is its linear-feature version | `LinUCB` |
 
 Note: **the room's truth vs the director's prior.** `sim/audience.yaml` is the *simulated
 room's hidden truth* (what the audience actually likes; it was called `priors.yaml` before

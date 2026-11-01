@@ -235,18 +235,18 @@ greedy). 30,000 jokes from `train.jsonl` (seed 0) in ~1.6 h at 5.2 jokes/s; 11 p
 marked by the user: y; n + better mode; ? (joke didn't land, no mode assignable); skipped (mostly
 NSFW). Labels: `data/labels/rjokes_hand_check.csv`. No pass criterion was fixed beforehand.
 
-| Judge mode | Share of 30k | y | n | ? | skipped | Precision | 95% CI (Wilson) |
+| Judge mode | Share of 90k | y | n | ? | skipped | Precision | 95% CI (Wilson) |
 |---|---|---|---|---|---|---|---|
-| wordsmith | 28.0% | 11 | 0 | 1 | 3 | 100% | 74–100% |
+| wordsmith | 28.2% | 11 | 0 | 1 | 3 | 100% | 74–100% |
 | cynic | 27.2% | 10 | 1 | 1 | 3 | 91% | 62–98% |
-| neurotic | 21.1% | 6 | 1 | 2 | 6 | 86% | 49–97% |
-| observer | 11.2% | 11 | 3 | 0 | 1 | 79% | 52–92% |
-| absurdist | 10.6% | 7 | 0 | 6 | 2 | 100% | 65–100% |
+| neurotic | 20.5% | 6 | 1 | 2 | 6 | 86% | 49–97% |
+| observer | 11.5% | 11 | 3 | 0 | 1 | 79% | 52–92% |
+| absurdist | 10.7% | 7 | 0 | 6 | 2 | 100% | 65–100% |
 | optimist | 1.3% | 9 | 2 | 1 | 3 | 82% | 52–95% |
 | none | 0.6% | 14 | 1 | 0 | 0 | 93% | 70–99% |
 
 **Findings**
-1. **Mode labels mostly hold:** 89% on judged rows (81–95%), **92%** re-weighted to the 30k mode mix.
+1. **Mode labels mostly hold:** 89% on judged rows (81–95%), **92%** re-weighted to the mode mix of all 90k labels (same at 30k).
 2. **Misses lean to wordsmith:** 5 of 6 misses with a known mode were puns the judge filed elsewhere
    (observer ×2, neurotic, optimist, none). Wordsmith's last place in percentile may be slightly
    understated in size, not order.
@@ -273,3 +273,30 @@ quoted for illustration only, the full set stays local, see decisions.md 2026-10
 
 Safety misses are described, not quoted: 8 rows of sexual content or innuendo (e.g. row 67, a
 delivery-driver double meaning), 3 targeting a group, 1 about bodies; the judge flagged none.
+
+## R2 extended to 90k: precision rule met (2026-11-01)
+
+Same labeler, seed and sample order as the first 30k, extended twice (`N=60000`, then `N=90000`).
+The 90k run hit a CUDA OOM at 76k on code from before the halve-and-retry fix (job started before
+the pull); a later job finished it. Checked on the laptop: 90,000 lines, 90,000 unique ids, no torn
+lines, and the first 30k identical to the earlier file (no label changed). 45 parse failures (0.05%).
+Log: [end + precision table](../assets/labeling/batch-labeling-90k.png).
+
+| Mode | Jokes | Share | Mean pct | 95% CI ± | Mean pct at 30k |
+|---|---|---|---|---|---|
+| optimist | 1,170 | 1.3% | 0.531 | 0.016 | 0.530 |
+| neurotic | 18,480 | 20.5% | 0.522 | 0.004 | 0.525 |
+| absurdist | 9,632 | 10.7% | 0.521 | 0.006 | 0.515 |
+| observer | 10,305 | 11.5% | 0.509 | 0.005 | 0.521 |
+| cynic | 24,496 | 27.2% | 0.507 | 0.004 | 0.508 |
+| wordsmith | 25,332 | 28.2% | 0.469 | 0.003 | 0.470 |
+| none | 540 | 0.6% | 0.443 | 0.023 | 0.418 |
+
+**Findings**
+1. **Precision rule met:** every mode within ±0.02 (optimist ±0.016; `none` is excluded by the rule).
+   No further extension.
+2. **Three tiers, not a full order:** optimist on top; neurotic ≈ absurdist; observer ≈ cynic
+   (overlapping CIs); wordsmith clearly last. Observer and absurdist swapped places from 30k,
+   within the 30k CIs: a reminder not to read the middle order as settled.
+3. **Wordsmith last is robust:** same at 30k and 90k, and last in HumorGen's judge ranking too.
+   The hand check's misses were puns filed elsewhere, which would grow wordsmith's group, not move it.

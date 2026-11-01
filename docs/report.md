@@ -119,8 +119,8 @@ How to read the numbers (laughs per show, laughs lost vs oracle, cold start, CI)
 | Show state B: career + tonight's correction (κ sweep) | Choice quality after shift / steady; repeat and hurt-pick rates | Done (notebook Exp 8) | No κ passes: win-stay meets fatigue (repeats 29% → 54%) and untried modes are never tested → C needs in-show exploration + fatigue planning |
 | Callbacks: greedy vs sequential | Late-set laugh rate, laughs lost | Planned (explore-next #5) | |
 | Prior strength sweep | Laughs lost vs prior weight | Planned (explore-next #7) | |
-| Hand check of R2 judge labels | Mode precision vs 105 hand labels; safety-flag misses | Done (notebook Exp 9) | Modes 92% precise at the 30k mix, misses lean to puns; safety flags caught 0 of 16 hand-flagged jokes. Examples: [metrics.md](metrics.md#hand-check-of-r2-labels-2026-10-31) |
-| Human vs LLM-judge mode ranking | Rank correlation, rJokes upvotes vs HumorGen | Labels checked; waiting on R2 extension | |
+| Hand check of R2 judge labels | Mode precision vs 105 hand labels; safety-flag misses | Done (notebook Exp 9) | Modes 92% precise at the labeled mode mix, misses lean to puns; safety flags caught 0 of 16 hand-flagged jokes. Examples: [metrics.md](metrics.md#hand-check-of-r2-labels-2026-10-31) |
+| Human vs LLM-judge mode ranking | Rank correlation, rJokes upvotes vs HumorGen | Next: 90k labels ready, all modes within ±0.02 | |
 | Room's `base` from human data | Change in policy ranking | After the above | |
 | Long-form sets | Word budget, closer present, planned callbacks used | Planned | |
 | Live pilots | Detector vs operator agreement; episode rating | Weeks 5–7 | |

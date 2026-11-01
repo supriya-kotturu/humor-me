@@ -188,6 +188,8 @@ Format: **Symptom** → **Cause** → **Caught by** → **Fix** (commit / file).
 | r/Jokes grew ~1000x 2008→2019 | Raw scores aren't comparable across years | `pct` = score percentile within the post's year; use `pct`, not `score`, for priors |
 | `pytest` missing | System Python has no pytest | Run tests with `.venv/Scripts/python -m pytest tests -q` |
 | Hand-check CSV → `UnicodeDecodeError: 0x92` (2026-10-31) | Excel "CSV" saves in cp1252: smart quotes are bytes 0x92–0x94, not UTF-8 | Read once with `encoding="cp1252"`, write the tracked copy (`data/labels/rjokes_hand_check.csv`) as UTF-8. Save as **"CSV UTF-8"** in Excel next time |
+| `test_docs` → `UnicodeDecodeError: 0xb1` in report.md (2026-11-01) | A `sed` replacement typed through the agent's shell wrote "±" as one Latin-1 byte, not UTF-8 | Caught by the docs test; byte repaired. Same lesson as the backslash rows: **edit text with non-ASCII characters through the Edit tool, not `sed`** |
+| Labeling job "OOM at 76k" after #23 merged | Job started before the cluster checkout was pulled; Python had already loaded the old script | `sacct` start time vs `git reflog` pull time. **Pull, then submit**; check `git log -1` in the job log |
 | Hand-check CSV has joke text but `data/processed/` is gitignored | Evidence for the notebook would be lost | Tracked copy keeps ids, judge labels, human verdict/mode/flags only; free-text safety notes mapped to judge flag names (`other:<topic>` when outside the schema) |
 
 Result: 432,457 rows → 402,981 after dedupe + 4–200 word filter (train 323,573 / dev 39,764 /

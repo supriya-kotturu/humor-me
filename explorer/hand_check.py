@@ -90,14 +90,14 @@ def run(hand: str = HAND, modes: str = MODES) -> dict:
 
 
 def table(res: dict) -> str:
-    out = ["| Judge mode | Share of 30k | y | n | ? | skipped | Precision | 95% CI |", "|---|---|---|---|---|---|---|---|"]
+    out = ["| Judge mode | Share of labels | y | n | ? | skipped | Precision | 95% CI |", "|---|---|---|---|---|---|---|---|"]
     for m, s in sorted(res["per_mode"].items(), key=lambda kv: -kv[1]["share"]):
         p = "–" if s["precision"] is None else f"{s['precision']:.0%}"
         out.append(f"| {m} | {s['share']:.1%} | {s['y']} | {s['n']} | {s['unsure']} | {s['skip']} "
                    f"| {p} | {s['ci'][0]:.0%}–{s['ci'][1]:.0%} |")
     lo, hi = res["sample_ci"]
     out.append(f"\nPrecision on judged rows: **{res['sample_precision']:.0%}** ({lo:.0%}–{hi:.0%}); "
-               f"re-weighted to the 30k mode mix: **{res['weighted_precision']:.0%}**.")
+               f"re-weighted to the labeled mode mix: **{res['weighted_precision']:.0%}**.")
     out.append("Misses (judge → human): " + ", ".join(f"{k} ×{v}" for k, v in res["misses"].items()))
     sf = res["safety"]
     out.append(f"\n| Human safety note | Rows | Judge flagged it too |\n|---|---|---|")

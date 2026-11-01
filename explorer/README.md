@@ -77,6 +77,8 @@ head -3 /tmp/smoke.jsonl && exit
 ```
 Measured 2026-10-31: `True Tesla V100-SXM2-32GB`; **50/50 labeled, 3.4 jokes/s, 0 parse failures**
 (→ ~2.5 h for 30k). The "generation flags are not valid" warning is expected: decoding is greedy.
+The batch run was faster: **5.2 jokes/s, 30k in ~1.6 h, 11 parse failures** (job 11534420;
+[log screenshot](../assets/labeling/batch-labeling.png)).
 
 ## Runs
 

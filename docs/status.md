@@ -17,8 +17,8 @@ Learning the material from scratch (RL foundations → our experiments → Explo
 | Show state (A → B → C) | **A** (tonight's record as features): not adopted, hedges (Exp 7). **B** (two timescales, speed sweep): next. **C** (MDP + callbacks): week 6 |
 | Decision notebook | Exp 1–7, 24/24 claim checks ✅. Run `python scripts/run_notebook.py` before committing it |
 | Tests | `.venv/Scripts/python -m pytest tests -q`: 100 passing, synthetic data only |
-| rJokes | R1 prep done (403k jokes). **R2 labeling running on Explorer** (job 11534420, 30k jokes, ~2.5 h) → `modes.jsonl` |
-| Explorer (NEU HPC) | Working env: Python 3.13 module, `torch==2.5.1+cu121`, `transformers` 4.57, V100 in float16, 3.4 jokes/s ([explorer/README.md](../explorer/README.md); PR #16) |
+| rJokes | R1 prep done (403k jokes). **R2 first 30k labeled** (job 11534420, ~1.6 h, 11 parse failures); `modes.jsonl` copied to the laptop. **Precision rule not met:** optimist has only 399 jokes (±0.029) → extend ([metrics.md](metrics.md#r2-rjokes-mode-labels-2026-10-31)) |
+| Explorer (NEU HPC) | Working env: Python 3.13 module, `torch==2.5.1+cu121`, `transformers` 4.57, V100 in float16, 5.2 jokes/s in batch ([explorer/README.md](../explorer/README.md)) |
 | Transcript pipeline | **Paused 2026-10-26**. Bits F1 0.80 on Bargatze; kept for structure stats + report appendix |
 | Report | [report.md](report.md): overview written (user + AI), results table filled for Exp 1–7 |
 | Wiki | [docs/wiki/](wiki/README.md) + [glossary](wiki/glossary.md), mirrored to the GitHub wiki by `scripts/sync_wiki.py` after merges |
@@ -28,8 +28,8 @@ Learning the material from scratch (RL foundations → our experiments → Explo
 
 | PR | What |
 |---|---|
-| #16 | Explorer environment that runs (V100, transformers, cu121) + setup dev-log |
-| #17 | (user) Why the sim's mode strengths use a linear win-rate map |
+| #19 | Show state step B: tonight's correction can't read a turn without exploration |
+| this | R2 labeling result (first 30k) |
 
 ## Models and providers
 
@@ -55,8 +55,10 @@ Learning the material from scratch (RL foundations → our experiments → Explo
 1. **Show state step B** (two timescales: career estimate + fast per-show correction), sweeping
    "how fast to believe tonight"; adopt a speed only if it passes both criteria (shifted-show
    gain ≥ 0.05, steady-show change ≥ −0.01). Notebook Exp 8.
-2. When R2 finishes: copy `modes.jsonl` back, hand-check 100 labels, then the human-vs-judge
-   mode ranking (explore-next #1).
+2. **Extend R2** (precision rule): `N=60000 sbatch explorer/label_modes.sbatch` resumes and
+   labels the next 30k. At optimist's 1.3% share, 60k gives ~800 optimist jokes, right at the
+   ±0.02 edge, so a third extension may follow. Meanwhile hand-check 100 labels, then the
+   human-vs-judge mode ranking (explore-next #1).
 3. **Demo track from Monday Nov 2:** voice loop → waveform UI → operator laugh button (roadmap
    weeks 3–4), then laugh detection (week 5).
 4. Week 6: step C (MDP + callbacks) with the final sim figures.

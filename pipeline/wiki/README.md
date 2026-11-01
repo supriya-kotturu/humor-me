@@ -15,6 +15,7 @@ exactly how it's applied here. Read in order if you're new; each page links to t
 How it all ends up as clean, labeled transcripts:
 
 ```mermaid
+%%{init: {"theme": "default"}}%%
 flowchart TD
     PDF["Printed web page (PDF)"] -->|"1 · margins, paragraphs, trims"| BODY["Performance text<br/>with inline markers"]
     BODY -->|"2 · lexicon → levels, density gate"| EV["Clean text + reaction events"]

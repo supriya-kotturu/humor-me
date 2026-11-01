@@ -28,6 +28,7 @@ never as text the model imitates.
 ## How the pieces depend on each other
 
 ```mermaid
+%%{init: {"theme": "default"}}%%
 flowchart LR
     RAW[/"data/raw PDFs<br/>(you download)"/] --> PIPE["pipeline/<br/>S0 ingest → S2 markers → … S6"]
     CFG[("data/markers.yaml<br/>data/body_overrides.yaml")] --> PIPE

@@ -25,6 +25,7 @@ how that maps to a learning problem → how we test it.
 | – | [Glossary](glossary.md) | Everywhere | Shared vocabulary: comedy units, agent roles, learning and evaluation terms |
 
 ```mermaid
+%%{init: {"theme": "default"}}%%
 flowchart LR
     A["1 · LLM humor<br/>falls short"] --> B["2 · comedians build<br/>bits and sets"]
     B --> C["3 · picking the next bit's mode<br/>= contextual bandit"]
@@ -43,3 +44,6 @@ after each merged wiki change. Edit here, never on the GitHub wiki (it gets over
 
 Template: `# Title` → `**Where it fits / Used in**` → concept sections → `## In this project`
 → `## Further reading` (links checked to be live when added; say what each link is good for).
+
+Mermaid diagrams start with `%%{init: {"theme": "default"}}%%` on the line after the fence, so
+they render light in GitHub's dark mode too (`tests/test_docs.py` checks every tracked `.md`).

@@ -6,6 +6,7 @@ text the model imitates (see decisions.md, 2026-10-20). All data lives in `data/
 ## Overview
 
 ```mermaid
+%%{init: {"theme": "default"}}%%
 flowchart TD
     RAW[/"data/raw/*.pdf<br/>19 specials"/] --> S0["S0 Ingest<br/>PDF → text, strip site boilerplate"]
     S0 --> S1["S1 Extract markers<br/>[...] / (...) → events with offsets"]
@@ -29,6 +30,7 @@ flowchart TD
 ## How the outputs feed the agent
 
 ```mermaid
+%%{init: {"theme": "default"}}%%
 flowchart LR
     subgraph Offline
         BEATS[beats.jsonl] --> LP[Laugh predictor]

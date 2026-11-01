@@ -221,3 +221,14 @@ judge's noise, not the room's, so it adds rigor the inputs can't back. Supersede
 replaces `base` with rJokes per-mode upvote percentiles, which need their own mapping (decide
 centre, scale and offset again; percentiles are not win rates).
 Evidence: PR #1 transcript and code; metrics.md PR #1 (best vs runner-up gaps 0.015-0.052).
+
+## 2026-10-31 — rJokes is for mode statistics only, never joke material
+A hand check of 105 R2 labels (15 per judge mode) found the judge's **mode** labels 92% precise at
+the 30k mode mix (misses lean to wordsmith; absurdist often unplaceable), but its **safety** flags
+caught 0 of 16 jokes the user flagged (sexual 8, group 3, bodies 1, out-of-schema 4). Options:
+(a) extend the safety schema and re-label; (b) a separate, stricter safety classifier; (c) use
+rJokes only for per-mode statistics (the human mode ranking, the sim's `base`) and never as a
+source of jokes, so its safety labels are never relied on. **Chose (c)** (user): the ranking needs
+only mode labels, and invariant 1 already puts safety in the live loop. Rows 75 and 83 (judge wrong,
+true mode unknown) stay unfilled; no re-labeling.
+Evidence: notebooks/decisions.ipynb Exp 9; metrics.md "Hand check of R2 labels".

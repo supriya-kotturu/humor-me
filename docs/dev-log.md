@@ -187,6 +187,8 @@ Format: **Symptom** → **Cause** → **Caught by** → **Fix** (commit / file).
 | Repost in train and test | Splits were random over posts, not texts | The first split in train→dev→test order owns a text |
 | r/Jokes grew ~1000x 2008→2019 | Raw scores aren't comparable across years | `pct` = score percentile within the post's year; use `pct`, not `score`, for priors |
 | `pytest` missing | System Python has no pytest | Run tests with `.venv/Scripts/python -m pytest tests -q` |
+| Hand-check CSV → `UnicodeDecodeError: 0x92` (2026-10-31) | Excel "CSV" saves in cp1252: smart quotes are bytes 0x92–0x94, not UTF-8 | Read once with `encoding="cp1252"`, write the tracked copy (`data/labels/rjokes_hand_check.csv`) as UTF-8. Save as **"CSV UTF-8"** in Excel next time |
+| Hand-check CSV has joke text but `data/processed/` is gitignored | Evidence for the notebook would be lost | Tracked copy keeps ids, judge labels, human verdict/mode/flags only; free-text safety notes mapped to judge flag names (`other:<topic>` when outside the schema) |
 
 Result: 432,457 rows → 402,981 after dedupe + 4–200 word filter (train 323,573 / dev 39,764 /
 test 39,644). 75% carry no topic flag; scores are heavy at 0 (35%).

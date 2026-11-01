@@ -112,4 +112,5 @@ No S3-style object storage. The permanent copy is the laptop + git: copy `modes.
 every run (ids and labels only, so it can be committed).
 
 After the run, copy `modes.jsonl` back to the laptop, then spot-check 100 labels by hand
-before the sim uses them (record agreement in dev-log.md).
+before the sim uses them: hand labels in `data/labels/rjokes_hand_check.csv`, agreement from
+`python explorer/hand_check.py` (notebook Exp 9).

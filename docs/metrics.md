@@ -228,3 +228,30 @@ greedy). 30,000 jokes from `train.jsonl` (seed 0) in ~1.6 h at 5.2 jokes/s; 11 p
 3. **Spread between modes is small:** 0.47–0.53 in percentile, with wordsmith clearly last
    (also last in HumorGen's judge ranking). Not yet comparable to the judge ranking: that needs
    the year/length-matched pairs of explore-next #1, and a hand check of 100 labels first.
+
+## Hand check of R2 labels (2026-10-31)
+
+`python explorer/hand_check.py` (notebook Exp 9). 105 jokes from the first 30k, 15 per judge mode,
+marked by the user: y; n + better mode; ? (joke didn't land, no mode assignable); skipped (mostly
+NSFW). Labels: `data/labels/rjokes_hand_check.csv`. No pass criterion was fixed beforehand.
+
+| Judge mode | Share of 30k | y | n | ? | skipped | Precision | 95% CI (Wilson) |
+|---|---|---|---|---|---|---|---|
+| wordsmith | 28.0% | 11 | 0 | 1 | 3 | 100% | 74–100% |
+| cynic | 27.2% | 10 | 1 | 1 | 3 | 91% | 62–98% |
+| neurotic | 21.1% | 6 | 1 | 2 | 6 | 86% | 49–97% |
+| observer | 11.2% | 11 | 3 | 0 | 1 | 79% | 52–92% |
+| absurdist | 10.6% | 7 | 0 | 6 | 2 | 100% | 65–100% |
+| optimist | 1.3% | 9 | 2 | 1 | 3 | 82% | 52–95% |
+| none | 0.6% | 14 | 1 | 0 | 0 | 93% | 70–99% |
+
+**Findings**
+1. **Mode labels mostly hold:** 89% on judged rows (81–95%), **92%** re-weighted to the 30k mode mix.
+2. **Misses lean to wordsmith:** 5 of 6 misses with a known mode were puns the judge filed elsewhere
+   (observer ×2, neurotic, optimist, none). Wordsmith's last place in percentile may be slightly
+   understated in size, not order.
+3. **Absurdist is hard to verify:** 6 of 13 judged absurdist jokes couldn't be given any mode; the
+   label may be the judge's bin for jokes that don't land.
+4. **Safety flags are not usable as a filter:** the user flagged 16 rows (sexual 8, targets_group 3,
+   about_bodies 1, outside the schema 4: guns, death, Nazis, profanity); the judge flagged **none**
+   of them. Notes were opportunistic, so only misses are measured, not false alarms.

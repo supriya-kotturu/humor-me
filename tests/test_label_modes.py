@@ -111,3 +111,47 @@ def test_split_on_oom_reraises_other_errors():
 
     with pytest.raises(ValueError):
         split_on_oom(run, [0, 1], lambda e: False)
+
+
+# --- hand check of judge labels ---
+import csv
+
+
+def _hand(tmp_path, rows):
+    hand, modes = tmp_path / "hand.csv", tmp_path / "modes.jsonl"
+    cols = ["n", "id", "judge_mode", "judge_mode2", "judge_flags", "marked", "verdict", "human_mode", "human_flags"]
+    with hand.open("w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=cols)
+        w.writeheader()
+        w.writerows({c: r.get(c, "") for c in cols} for r in rows)
+    modes.write_text("".join(json.dumps({"id": f"m{i}", "mode": m}) + "\n"
+                             for i, m in enumerate(["cynic"] * 9 + ["optimist"])), encoding="utf-8")
+    return str(hand), str(modes)
+
+
+def test_hand_check_reweights_by_mode_share_and_ignores_unjudged(tmp_path):
+    from explorer.hand_check import run
+    rows = ([{"judge_mode": "cynic", "verdict": "y"}] * 2
+            + [{"judge_mode": "optimist", "verdict": "n", "human_mode": "wordsmith"}] * 2
+            + [{"judge_mode": "optimist", "verdict": "?"}, {"judge_mode": "cynic", "verdict": "skip"}])
+    res = run(*_hand(tmp_path, rows))
+    assert res["sample_precision"] == 0.5                                    # ? and skip left out
+    assert abs(res["weighted_precision"] - 0.9) < 1e-9                       # 90% cynic, all right
+    assert res["misses"] == {"optimist → wordsmith": 2}
+
+
+def test_hand_check_counts_judge_misses_per_human_flag(tmp_path):
+    from explorer.hand_check import run
+    rows = [{"judge_mode": "cynic", "verdict": "y", "human_flags": "sexual", "judge_flags": "sexual"},
+            {"judge_mode": "cynic", "verdict": "y", "human_flags": "sexual,other:nazi"}]
+    sf = run(*_hand(tmp_path, rows))["safety"]
+    assert sf["by_flag"]["sexual"] == {"human": 2, "judge_too": 1}
+    assert sf["by_flag"]["outside schema"] == {"human": 1, "judge_too": 0}
+    assert sf["judge_flagged_any_of_those"] == 1
+
+
+def test_wilson_stays_inside_zero_one():
+    from explorer.hand_check import wilson
+    lo, hi = wilson(12, 12)
+    assert 0 < lo < 1 and hi == 1.0
+    assert wilson(0, 0) == (0.0, 1.0)

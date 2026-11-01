@@ -15,9 +15,9 @@ Learning the material from scratch (RL foundations → our experiments → Explo
 | **Director policy** | **LinUCB + uniform prior**: 97% of oracle, +18% vs always-Neurotic (notebook Exp 4) |
 | Within-show adaptation | Open problem: the director reads rooms, not a room *turning* (Exp 5: 95% → 80% of oracle after a mid-set shift; Exp 6: longer sets don't help) |
 | Show state (A → B → C) | **A** (tonight's record as features): not adopted, hedges (Exp 7). **B** (career + tonight's correction): not adopted, no speed passes (Exp 8). **C** (MDP + callbacks, with in-show exploration and fatigue planning): next |
-| Decision notebook | Exp 1–8, all claim checks ✅. Run `python scripts/run_notebook.py` before committing it |
-| Tests | `.venv/Scripts/python -m pytest tests -q`: 100 passing, synthetic data only |
-| rJokes | R1 prep done (403k jokes). **R2 first 30k labeled** (job 11534420, ~1.6 h, 11 parse failures); `modes.jsonl` copied to the laptop. **Precision rule not met:** optimist has only 399 jokes (±0.029) → extend ([metrics.md](metrics.md#pr-20-rjokes-mode-labels-r2-first-30k-2026-10-31)) |
+| Decision notebook | Exp 1–9, all claim checks ✅. Run `python scripts/run_notebook.py` before committing it |
+| Tests | `.venv/Scripts/python -m pytest tests -q`: 112 passing, synthetic data only |
+| rJokes | R1 prep done (403k jokes). **R2 first 30k labeled** (job 11534420, ~1.6 h, 11 parse failures); `modes.jsonl` copied to the laptop. **Precision rule not met:** optimist has only 399 jokes (±0.029) → extend ([metrics.md](metrics.md#pr-20-rjokes-mode-labels-r2-first-30k-2026-10-31)). **Hand check (105 jokes):** mode labels 92% precise at the 30k mix, misses lean to wordsmith; judge safety flags caught 0 of 16 human-flagged rows (Exp 9) |
 | Explorer (NEU HPC) | Working env: Python 3.13 module, `torch==2.5.1+cu121`, `transformers` 4.57, V100 in float16, 5.2 jokes/s in batch ([explorer/README.md](../explorer/README.md)) |
 | Transcript pipeline | **Paused 2026-10-26**. Bits F1 0.80 on Bargatze; kept for structure stats + report appendix |
 | Report | [report.md](report.md): overview written (user + AI), results table filled for Exp 1–7 |
@@ -53,11 +53,11 @@ Learning the material from scratch (RL foundations → our experiments → Explo
 
 1. **Show state step C** (MDP over bits + callbacks): step B showed a per-bit correction learns
    what bombed but never tries untried modes, and trusting tonight repeats modes into fatigue.
-   C needs in-show exploration and fatigue planning (decisions.md 2026-10-31). Notebook Exp 9.
+   C needs in-show exploration and fatigue planning (decisions.md 2026-10-31). Notebook Exp 10.
 2. **Extend R2** (precision rule): `N=60000 sbatch explorer/label_modes.sbatch` resumes and
    labels the next 30k. At optimist's 1.3% share, 60k gives ~800 optimist jokes, right at the
-   ±0.02 edge, so a third extension may follow. Meanwhile hand-check 100 labels, then the
-   human-vs-judge mode ranking (explore-next #1).
+   ±0.02 edge, so a third extension may follow. Hand check done (Exp 9): mode labels usable,
+   safety flags not. Next: the human-vs-judge mode ranking (explore-next #1).
 3. **Demo track from Monday Nov 2:** voice loop → waveform UI → operator laugh button (roadmap
    weeks 3–4), then laugh detection (week 5).
 4. Week 6: final sim figures for the report.

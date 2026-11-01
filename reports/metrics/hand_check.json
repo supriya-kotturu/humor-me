@@ -1,0 +1,10 @@
+{"params": {"hand": "data/labels/rjokes_hand_check.csv", "modes": "data/processed/rjokes/modes.jsonl"}, "results": {
+  "rows": 105,
+  "verdicts": {"?": 11, "y": 68, "skip": 18, "n": 8},
+  "sample_precision": 0.8947368421052632,
+  "sample_ci": [0.805798558740362, 0.9456893873929819],
+  "weighted_precision": 0.9182497651736372,
+  "per_mode": {"absurdist": {"y": 7, "n": 0, "unsure": 6, "skip": 2, "precision": 1.0, "ci": [0.6456611570247934, 1.0], "share": 0.1055386975224249}, "cynic": {"y": 10, "n": 1, "unsure": 1, "skip": 3, "precision": 0.9090909090909091, "ci": [0.6226353745137962, 0.9837682477371741], "share": 0.2718330054353263}, "neurotic": {"y": 6, "n": 1, "unsure": 2, "skip": 6, "precision": 0.8571428571428571, "ci": [0.48686549668097007, 0.9743210440510253], "share": 0.21077728500450166}, "none": {"y": 14, "n": 1, "unsure": 0, "skip": 0, "precision": 0.9333333333333333, "ci": [0.7018292244757601, 0.9881334113938051], "share": 0.006202274167194638}, "observer": {"y": 11, "n": 3, "unsure": 0, "skip": 1, "precision": 0.7857142857142857, "ci": [0.5241027622679172, 0.9242875166308363], "share": 0.11244122845043182}, "optimist": {"y": 9, "n": 2, "unsure": 1, "skip": 3, "precision": 0.8181818181818182, "ci": [0.5230138624217553, 0.9486333993289995], "share": 0.013304878455433659}, "wordsmith": {"y": 11, "n": 0, "unsure": 1, "skip": 3, "precision": 1.0, "ci": [0.7411599827511859, 1.0], "share": 0.27990263096468704}},
+  "misses": {"observer \u2192 wordsmith": 2, "cynic \u2192 absurdist": 1, "neurotic \u2192 wordsmith": 1, "none \u2192 wordsmith": 1, "observer \u2192 ?": 1, "optimist \u2192 wordsmith": 1, "optimist \u2192 ?": 1},
+  "safety": {"human_flagged": 16, "judge_flagged_any_of_those": 0, "judge_flagged_total": 23, "by_flag": {"about_bodies": {"human": 1, "judge_too": 0}, "outside schema": {"human": 4, "judge_too": 0}, "sexual": {"human": 8, "judge_too": 0}, "targets_group": {"human": 3, "judge_too": 0}}}
+}}

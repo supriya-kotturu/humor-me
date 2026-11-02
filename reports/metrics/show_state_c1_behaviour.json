@@ -1,0 +1,4 @@
+{"params": {"names": ["LinUCB", "LinQ"], "seeds": 3, "shift_at": 4, "shows": 400}, "results": {
+  "LinUCB": {"repeat_rate": 0.2914285714285714, "hurt_pick_rate": 0.5071942446043165},
+  "LinQ": {"repeat_rate": 0.7733333333333333, "hurt_pick_rate": 0.16366906474820145}
+}}

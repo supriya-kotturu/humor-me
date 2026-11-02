@@ -123,9 +123,9 @@ class EpsilonGreedy:
 
 class _Linear:
     def __init__(self, prior: np.ndarray, prior_strength: float = 1.0, seed: int = 0,
-                 react: bool = False, show_state: bool = False):
+                 react: bool = False, show_state: bool = False, extra_features: int = 0):
         self.react, self.show_state = react, show_state
-        d, k = n_features(react, show_state), len(prior)
+        d, k = n_features(react, show_state) + extra_features, len(prior)
         self.A = np.stack([prior_strength * np.eye(d) for _ in range(k)])
         theta0 = np.zeros((k, d))
         theta0[:, 0] = prior
@@ -189,6 +189,51 @@ class TwoTimescale:
         predicted = self.base.scores(obs)[action, 0]
         self._surprise.setdefault(action, []).append(reward - predicted)
         self.base.update(obs, action, reward)
+
+
+PLANNING_FEATURES = 5
+
+
+def planning_features(obs: dict, arm: int) -> list[float]:
+    """Step C1's extra inputs: what a choice does to later bits depends on these."""
+    tonight = obs.get("tonight", ())
+    modes = [m for m, _ in tonight]
+    earlier = [r for _, r in tonight[:-1]]
+    drop = max(0.0, float(np.mean(earlier)) - tonight[-1][1]) if earlier else 0.0
+    untried = float(arm not in modes)
+    left = 1 - obs["t"] / obs["n_bits"]
+    return [float(len(modes) >= 2 and modes[-2] == arm), left, drop, drop * untried, untried * left]
+
+
+class LinQ(LinUCB):
+    """Show state step C1: linear Q-learning over the bits of a show, undiscounted.
+
+    Same ridge model and bonus as LinUCB, but the target is reward + the next bit's best value, so
+    a mode is valued for what it does to the rest of the show. update() only sees the bit just
+    played, so each bit's target is completed when the next bit's observation arrives.
+    """
+
+    def __init__(self, prior, **kw):
+        super().__init__(prior, react=True, show_state=True, extra_features=PLANNING_FEATURES, **kw)
+        self._pending = None
+
+    def _x(self, obs, arm):
+        return np.concatenate([features(obs, arm, react=True, show_state=True), planning_features(obs, arm)])
+
+    def _learn(self, obs, action, target):
+        x = self._x(obs, action)
+        self.A[action] += np.outer(x, x)
+        self.b[action] += target * x
+
+    def update(self, obs, action, reward):
+        if self._pending is not None:
+            prev_obs, prev_action, prev_reward = self._pending
+            self._learn(prev_obs, prev_action, prev_reward + self.scores(obs)[:, 0].max())
+        if obs["t"] == obs["n_bits"] - 1:  # last bit: nothing follows it
+            self._learn(obs, action, reward)
+            self._pending = None
+        else:
+            self._pending = (obs, action, reward)
 
 
 class LinTS(_Linear):

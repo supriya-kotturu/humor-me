@@ -19,7 +19,7 @@ import numpy as np
 from sim.cache import run_or_load
 from sim.env import AudienceEnv
 from sim.evaluate_policies import CONTEXTS, Oracle, ci
-from sim.policies import Fixed, LinTS, LinUCB, Random, TwoTimescale, prior_means
+from sim.policies import Fixed, LinQ, LinTS, LinUCB, Random, TwoTimescale, prior_means
 
 EVAL = 100
 RECOVERED = 0.02  # per-bit regret (reward units, ≈ 0.3 laughs) counted as "back on the best mode"
@@ -37,6 +37,7 @@ def policies(modes) -> dict:
         "LinTS + react": lambda env, s: LinTS(uni(env, s), seed=s, react=True),
         "LinUCB + show state": lambda env, s: LinUCB(uni(env, s), seed=s, show_state=True),
         "LinTS + show state": lambda env, s: LinTS(uni(env, s), seed=s, show_state=True),
+        "LinQ": lambda env, s: LinQ(uni(env, s), seed=s),
         **{two_ts_name(k): (lambda k: lambda env, s: TwoTimescale(LinUCB(uni(env, s), seed=s), k))(k)
            for k in TWO_TS_KAPPAS},
     }
@@ -54,6 +55,7 @@ def two_ts_name(kappa: float) -> str:
 
 
 TWO_TS_POLICIES = ("oracle", "random", "LinUCB", *map(two_ts_name, TWO_TS_KAPPAS))
+C1_POLICIES = ("oracle", "random", "LinUCB", "LinQ")
 
 
 def career(make, n_shows: int, seed: int, shift_at: int, n_bits: int = 8) -> list[dict]:

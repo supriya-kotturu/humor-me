@@ -394,6 +394,30 @@ planning, in the simulator. **C2** = callbacks. Keep C1 for its RL value; callba
 and DPO are done (user). They depend on a model that can write them and would add more made-up rewards to
 the simulator. C1's pass criteria get fixed in its own PR, before it runs.
 
+## 2026-11-01 — Show state step C1: method and pass criteria (fixed before running)
+**Pass criteria:** the same as steps A and B, so the three compare directly. Against plain LinUCB, at both 8
+and 16 bits: choice quality after the shift +≥ 0.05, and over the same bits in steady shows change ≥ −0.01.
+Same protocol as Exp 7 and 8: careers with a random half of shows shifted, same total bits, same seeds.
+**Method.** Options: (a) known-model planning: rejected, it would read the room's hidden truth; (b) PPO: more
+to tune and harder to debug, for an 8-step problem with few features; **(c) chose linear Q-learning**
+(`LinQ`): LinUCB's ridge model and exploration bonus, but each bit's target is its reward plus the best value
+of the next bit, with no discount. That target is what lets a choice be valued for what it does to later bits.
+**Inputs:** LinUCB's, plus the reaction and step A's show state, plus five for planning: used two bits ago
+(fatigue covers two bits), share of the show left, drop in last bit's reward vs tonight's earlier mean, that
+drop × untried tonight, and untried × share of the show left.
+**One run, no tuning:** if it fails, that's the result. Any later variant needs its own entry. PPO is the next
+candidate only if the user wants it. C1 runs in the simulator only, whose fatigue and shift are made up, and
+the live demo keeps LinUCB unless the user decides otherwise.
+
+## 2026-11-01 — Show state step C1, first run: fails, and the run doesn't test planning fairly
+Fails both criteria at both lengths. After the shift: −0.023 at 8 bits, −0.114 at 16. Steady shows: −0.198 and
+−0.255. It repeats the last mode 77% of the time (LinUCB 29%), though it picks a hurt mode less often (16% vs
+51%). Measured with a one-off script, seeds 0–2: 96% repeats in the first 50 shows, and values too high
+(predicted return ~3.6–4.0 vs actual ~2.8; last bit ~0.6 vs ~0.3). **Likely cause, not yet proven: a scale error
+in my design.** The uniform prior starts every mode at one bit's reward (~0.4), but Q-values estimate the rest
+of the show (~3), and the bonus is also sized for one bit, so a mode tried once would jump far above untried
+ones and the director would lock on. If so, this rejects this implementation, not MDP planning.
+
 ## 2026-11-01 — rJokes may also test judges, still never joke material
 Extends the 2026-10-31 rule (user). To choose the judge behind the DPO preference pairs, compare a plain judge,
 a "human taste" prompt, and that prompt with example pairs, on how often each picks the joke with more upvotes

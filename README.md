@@ -1,7 +1,7 @@
 # humor-me
 
 A voice-only stand-up comedy agent that reads the room through laughter and picks its next
-bit with reinforcement learning. RL course final project (milestone M1: Dec 15, 2026).
+bit with reinforcement learning. RL course final project (target Dec 8, 2026; presentation and report Dec 14).
 
 The agent is shown as an animated waveform, speaks through text-to-speech, listens for
 laughter, and uses a contextual bandit / sequential policy over "persona modes" to decide what

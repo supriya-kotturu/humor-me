@@ -3,8 +3,8 @@
 ## Goal
 
 A voice agent (rendered as an animated waveform) that performs stand-up to whoever is in
-front of it: sets the stage from the venue, delivers material, handles banter and roasts,
-and adapts to the room in real time based on laughter. Research first; a working demo is the
+front of it: sets the stage from the venue, delivers material, handles banter and roasts
+(after M1; cut from the Dec 8 demo), and adapts to the room in real time based on laughter. Research first; a working demo is the
 vehicle.
 
 ## Architecture
@@ -31,7 +31,8 @@ mic ─► VAD ─┬─► laughter detector ─► laugh features ────
 | Timescale | Mechanism | Updates |
 |---|---|---|
 | Within a set (seconds–minutes) | Contextual bandit over persona modes | Bandit posterior, in-context "what landed" memory |
-| Across sets (days–weeks) | Reward model from logged laughs + votes → DPO on generator | Model weights, offline |
+| Before the demo (M1) | SFT, then DPO on the generator, from judge preference pairs on our own premises (decisions.md 2026-11-01) | Model weights, offline |
+| Across sets (days–weeks, after M1) | Reward model from logged laughs + votes → DPO on generator | Model weights, offline |
 
 No gradient updates during a live show.
 
@@ -84,7 +85,8 @@ rJokes (432k, score 0–11) ──► rjokes prep (L): dedupe, length filter, bl
                                                                     └──► judge calibration (sim idea B)
 transcripts (local only) ──► S0–S6 (frozen) ──► aggregate structure stats ──► SET PLANNER targets
 HumorGen paper ──► mode definitions + candidate-gen recipe ──► GENERATOR prompts
-own session logs ──► (post-M1) reward model, DPO
+own premises ──► 6-mode candidates ──► judge pairs ──► SFT, DPO ──► GENERATOR (M1)
+own session logs ──► (post-M1) reward model, further DPO
 ```
 
 | Component | Model | Runs on | Data in | Data out |

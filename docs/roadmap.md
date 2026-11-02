@@ -1,6 +1,9 @@
 # Roadmap
 
-## M1 — Dec 15, 2026 (RL course final project, school demo)
+## M1 — Target Dec 8, 2026 (RL course final project)
+
+Everything is finished by **Dec 8**. Spillover is handled by **Dec 12**. **Dec 14:** final presentation
+(15 min at most, team) and final report due (decisions.md 2026-11-01).
 
 Budget: 8 weeks × 12–15 h ≈ **100–110 h**. Two audiences: course graders (need RL rigor) and
 class demo (needs a live run that is fast, safe, funny).
@@ -11,20 +14,22 @@ so the grade isn't hostage to audio/latency problems.
 
 | Tier | Scope |
 |---|---|
-| Must | Simulated audience env; bandit algos + baselines + regret curves; voice loop + waveform UI; core identity × 6 modes generation; safety filter (teens hard rule); laughter detection with operator-button fallback; laugh-aware turn-taking; episode logging |
-| Should | Banter/roast handling via ASR; training-mode episode rating; 3–5 pilot sessions |
+| Must | Simulated audience env; bandit algos + baselines + regret curves; voice loop + waveform UI; trained joke model (SFT, then DPO) with core identity × 6 modes generation; safety filter (teens hard rule); laughter detection with operator-button fallback; laugh-aware turn-taking; episode logging |
+| Should | MDP show state (step C1, sim only); training-mode episode rating; 3–5 pilot sessions |
 | Could | LLM-judge rerank of K=3 candidates; pairwise vote UI |
-| Cut (post-M1) | VLM snapshot (operator sets context), commute venue, learned RM, DPO, distillation, H1 live experiment |
+| Cut (post-M1) | Callbacks (step C2, after the demo and DPO); banter/roast handling via ASR; VLM snapshot (operator sets context), commute venue, reward model from logged shows, H1 live experiment |
 
 | Wk | Dates | Deliverable | Exit criterion |
 |---|---|---|---|
 | 1 | Oct 20–26 | Stack scaffold (FastAPI + Next.js), log schema, **latency spike** (streaming LLM → streaming TTS), sim env spec | Measured end-to-end latency; pick providers |
 | 2 | Oct 27–Nov 2 | **Sim env** (gym-style, parametric audience) + ε-greedy, LinUCB, Thompson + fixed/random baselines | Regret curves for all policies across 3 venue contexts |
+| Model track | Nov 1–22 | Own premises → 6-mode candidates → judges compared on rJokes pairs and a small human vote → SFT → DPO, on Explorer. Starts tonight; latest SFT Nov 15, DPO Nov 22 | Trained model beats the base model on a human vote; runs locally within the latency budget, or Gemini is the fallback |
 | 3–4 | Nov 3–16 | Voice loop, waveform UI, operator panel (venue/energy/age + laugh button), mode-conditioned generation, safety filter | 10-min generated set plays end-to-end, logged |
 | 5 | Nov 17–23 | VAD + laughter detector + hold-during-laugh; bandit wired to live reward | Detector vs operator button agreement measured; no talking over laughs |
-| 6 | Nov 24–30 | ASR banter/roast handling; episode rating UI; final sim experiments + plots (switching penalty ablation) | Report-ready figures |
-| 7 | Dec 1–7 | Pilot sessions (friends/classmates), fix top issues, report draft | ≥ 3 logged live sessions |
-| 8 | Dec 8–15 | **Feature freeze.** Rehearse demo in noisy room, finalize report | Demo runs 3× in a row without intervention |
+| 6 | Nov 24–30 | Episode rating UI; final sim experiments + plots (switching penalty ablation) | Report-ready figures |
+| 7 | Dec 1–8 | Pilot sessions (friends/classmates), fix top issues. **Feature freeze:** report and slides finished, demo rehearsed in a noisy room | ≥ 3 logged live sessions; demo runs 3× in a row without intervention |
+| 8 | Dec 9–12 | Spillover only: nothing new starts here | Everything from week 7 closed |
+| – | Dec 13–14 | Rehearse the talk. **Dec 14: final presentation (≤ 15 min, team); final report due** | Talk fits in 15 min, demo included if there is one |
 
 ### Sprint Oct 26 – Nov 2: reach ~40% of M1 "Must"
 

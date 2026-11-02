@@ -377,3 +377,39 @@ tastes. A judge prior in a human room makes no clear difference (45.0 ± 1.0).
 so part of learning's advantage comes from those made-up values. This shows the choice doesn't depend on
 `base`, not how much learning would help in a real room. Live pilots have to answer that.
 Evidence: notebooks/decisions.ipynb Exp 13; metrics.md "Two tastes in the sim".
+
+## 2026-11-01 — M1 target moves to Dec 8; presentation and report on Dec 14
+From the user. Replaces the Dec 15 date (2026-10-20 entry). Target Dec 8, spillover by Dec 12, and on Dec 14
+the final presentation (15 min at most, team) and final report are due. The old week 8 (freeze, rehearse,
+finalize the report) now has to fit into Dec 1–8, so the demo track has about a week less of slack.
+
+## 2026-11-01 — Cut banter and roast handling from M1
+From the user, to make room for the trained joke model and show state. The agent won't hear or answer what
+people say in the demo, so nothing can trigger a roast response. Invariant 4 (concede and escalate, never
+hostile) still stands and applies again if banter returns after M1. Laugh detection is unaffected.
+
+## 2026-11-01 — Split show state step C: keep the MDP, defer callbacks
+Step C was "MDP + callbacks". **C1** = MDP over the 8 bits with show state, in-show exploration and fatigue
+planning, in the simulator. **C2** = callbacks. Keep C1 for its RL value; callbacks come back after the demo
+and DPO are done (user). They depend on a model that can write them and would add more made-up rewards to
+the simulator. C1's pass criteria get fixed in its own PR, before it runs.
+
+## 2026-11-01 — rJokes may also test judges, still never joke material
+Extends the 2026-10-31 rule (user). To choose the judge behind the DPO preference pairs, compare a plain judge,
+a "human taste" prompt, and that prompt with example pairs, on how often each picks the joke with more upvotes
+among same-year, similar-length pairs. Asking a judge to have human taste doesn't give it that taste, so this
+measures it. Examples shown to a judge must pass a hand check first. rJokes text is still never used to train
+or feed the generator, and never committed. Upvote noise caps every judge's score, so small gaps won't count.
+
+## 2026-11-01 — Trained joke model and DPO move into M1, from our own premises
+Replaces DPO's "cut until after M1" (user): the Dec 8 demo is the agent on screen with its waveform and audio,
+speaking jokes from a model we trained. DPO should finish well before that. Training order follows HumorGen:
+SFT first, then DPO on top. HumorGen found DPO about equal to SFT, so SFT is the safe checkpoint.
+**Preference pairs:** there are no logged shows yet and rJokes is not joke material, so they come from a judge
+on jokes generated per mode, chosen by the rJokes comparison above, plus a small human vote. The model learns
+that judge's taste, which Exp 10 shows matches people only in part. The report must say so.
+**Prompts.** Options: (a) SemEval 2026 Task 1 headlines and word pairs, as HumorGen did: directly comparable,
+but we found no license or download link and news can be sensitive; **(b) chose our own premises** (user), which
+give control over the data and the bit and scene structure we want. Cost: not directly comparable to HumorGen.
+Limits: our 7B generator and judge are weaker than HumorGen's 32B and 70B. The reward model from logged shows
+(H2) stays after M1.

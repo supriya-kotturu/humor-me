@@ -98,6 +98,17 @@ room's hidden truth* (what the audience actually likes; it was called `priors.ya
 2026-10-28). A *prior* is only ever the *director's starting guess* about that truth. They're
 deliberately separate: a good director must do well even when its guess is wrong.
 
+## Judge: ranking candidate jokes
+
+| Term | Meaning here | In code |
+|---|---|---|
+| **Pairwise comparison** | One judge call: two candidate jokes for the same prompt, "which is funnier?" | `judge.Comparison` |
+| **Bradley–Terry (BT)** | Model where each joke has a strength θ and P(i beats j) = σ(θ_i − θ_j); fitted from many comparisons, with α virtual wins/losses per joke as a prior | `judge.fit_bt` |
+| **Position bias** | A judge preferring whichever joke it reads first (or second). Cancelled by a coin flip per call for which joke is shown first, recorded as `shown_first` | `judge/rank.py: _ask` |
+| **Borda score** | A joke's average win rate over the opponents it has played; a model-free check on θ | `judge.bt.borda_scores` |
+| **Cut-off** | A boundary to get right, e.g. "who is in the top 5" (m = 5) or "who is in the bottom 5" (m = n − 5) | `top_cutoffs`, `bottom_cutoffs` |
+| **LUCB** | Pair-selection rule: at each cut-off, compare the weakest-looking insider with the strongest-looking outsider (by confidence bounds θ ± β·se) where they overlap most; stop when every cut-off is **separated** (no overlap) | `judge.select.adaptive_next` |
+
 ## Evaluation: how we measure
 
 | Term | Meaning here |

@@ -560,3 +560,10 @@ From the user. Each task in docs/plans/live-loop.md is small enough for a Sonnet
 re-derives a number, and sends fixes back before opening the PR. The checklist is `.github/pull_request_template.md`. Experiments that need the cluster, a mic or
 a live room are run by the user. The plan's pass bars are first estimates (user): builders never move one, but the user can re-tune a bar when an experiment shows it was wrong,
 with a new entry giving the old bar, the new bar and the result behind it. Judgment call, not measured.
+
+## 2026-11-08 — Safety filter: rules first, classifier only if they miss (Exp 19)
+From docs/plans/live-loop.md T8. Options: (a) rules (blocklist, protected-group terms, body words aimed at others, named-person heuristics, stricter teen rules), fails closed;
+(b) a classifier (Perspective or an LLM) on every line. Rules are free and explain themselves but miss indirect phrasing; a classifier costs latency and a dependency, which
+the show can't spare. Bar, fixed before any rule: catch 100% of the hard-rule lines on a red-team list and reject at most 10% of clean lines. 158 red-team lines (written first, split
+into tuning and held-out) and 60 clean robot lines. The rules were written once, then scored once; no rule was changed after seeing a result. Result and the missed lines: see Exp 19 and metrics.md.
+The committed blocklist holds mild words only; the real slur list is added locally. Clean lines are a stand-in until T7's bank merges: Exp 19 needs a re-run on the real bank.

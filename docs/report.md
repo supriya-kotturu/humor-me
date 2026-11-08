@@ -144,6 +144,9 @@ H1 live experiment with enough sessions for confidence intervals.
 
 ## 10. Acknowledgements and AI use
 
+Stand-up transcripts came from Scraps from the Loft (scrapsfromtheloft.com), used with the site admin's permission as a local research corpus for studying comedic structure. They were not redistributed or published.
+
+
 Overview: paragraphs 1–4 written by the author; paragraphs 5–8 (RL loop → what was built →
 result → limits) drafted by the AI (Claude) at the author's request, then edited by the author.
 State exactly what the AI (Claude) wrote: code (by module), docs, wiki pages, report sections,

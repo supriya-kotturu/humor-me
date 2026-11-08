@@ -238,3 +238,6 @@ data/external/
 
 # Live show logs: replay data, local only
 data/sessions/
+
+# Permission emails: personal addresses, and this repo is public
+data/permissions/

@@ -21,7 +21,7 @@ Findings from the pre-review and how each was fixed. Which number was re-derived
 - [ ] Tests check what the code guarantees
 - [ ] Frozen contract unchanged, or a new decisions.md entry
 - [ ] Experiment is a `run(**params)` through `run_or_load`, or N/A
-- [ ] Section in `notebooks/decisions.ipynb` with ✅/❌ checks, re-run, or N/A
+- [ ] Section in the right `notebooks/decisions-*.ipynb` (data, director, live) with ✅/❌ checks, re-run, or N/A
 - [ ] `COVERAGE` entry in `notebooks/decision-plot.ipynb`, re-run, or N/A
 - [ ] Results in `docs/metrics.md`, or N/A
 - [ ] Decision in `docs/decisions.md`, or "judgment call, not measured"

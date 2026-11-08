@@ -5,3 +5,5 @@ httpx==0.28.1
 python-dotenv==1.1.0
 kokoro==0.9.4
 soundfile==0.14.0
+numpy==2.5.4
+PyYAML==6.0.3

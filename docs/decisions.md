@@ -567,3 +567,45 @@ From docs/plans/live-loop.md T8. Options: (a) rules (blocklist, protected-group 
 the show can't spare. Bar, fixed before any rule: catch 100% of the hard-rule lines on a red-team list and reject at most 10% of clean lines. 158 red-team lines (written first, split
 into tuning and held-out) and 60 clean robot lines. The rules were written once, then scored once; no rule was changed after seeing a result. Result and the missed lines: see Exp 19 and metrics.md.
 The committed blocklist holds mild words only; the real slur list is added locally. Clean lines are a stand-in until T7's bank merges: Exp 19 needs a re-run on the real bank.
+
+## 2026-11-08 — Scraps from the Loft permission, on record
+**Log.** On 2026-10-20 the user asked the site, through its contact form, to use about 30 to 50 specials as a local research corpus for this course project: not redistributed, not published, not used
+commercially, fetched slowly, and the site credited in the report. On 2026-10-23 the site admin (Chris, from the scrapsfromtheloft.com admin address) replied: "you have the permission to use the stand-up
+transcripts for your reinforcement learning project under the conditions you outlined." The screenshot is kept locally at `data/permissions/` and gitignored, because this repo is public and it shows personal email addresses.
+**What this settles:** the site's terms for our access, and the conditions above are now binding. The report credits the site.
+**What it doesn't:** the site doesn't hold the rights to the specials, and the request itself said not published. So the 2026-10-20 rule stands: transcripts are for structure and reward labels, only numbers
+leave the laptop, and no joke text is committed or used to write lines. Replaces "deferred, check ToS" in data-sources.md.
+
+## 2026-11-08 — One decisions notebook per project section
+From the user: `notebooks/decisions.ipynb` keeps growing (Exp 1 to 18 in one file). Options: (a) one notebook; (b) one per experiment: dozens of files, and related experiments lose their shared story; **(c) one per section (user):** data, director, live loop, model.
+`decisions.ipynb` stays as a short index, so existing links work, and experiment numbers stay global. Judgment call, not measured. Task T12 in docs/plans/live-loop.md.
+
+## 2026-11-08 — Joke bank gets bit structure, transcript statistics stay undecided
+From the user: the test bank should have some structure. Bank bits become opener, three tags and a closer that calls back to the opener, hand-written from the form in docs/wiki/standup-structure.md, with no transcript input. Whether to compute per-bit statistics
+from transcripts for T9's prompt is still open (user). Judgment call, not measured.
+
+## 2026-11-08 — Exp 18: exploring at ε = 0.2 misses its bar in one of six rooms
+Adds to the ε entry above, which stays as written; this replaces its scratch number. Bar fixed beforehand (live-loop plan, T1): at 5 shows,
+ε = 0.2 loses at most 1 laugh per show at the far end of the 95% CI, in every variant. Variants: judge and human taste, each with the gaps between modes
+(`base` scaled around its mean) halved, as they are and doubled; paired on seeds, 1,000 seeds at 5 shows and 200 at 30.
+**Result:** met in five rooms (changes -0.16 to -0.48, far ends -0.26 to -0.60). **Missed in judge taste with doubled gaps: -1.00 ± 0.14, far end -1.13.**
+Judge taste as it is reproduces the scratch number: -0.48 ± 0.12 (1.1%). ε = 0.1 costs about half as much (-0.01 to -0.44). 30 shows had no bar:
+-0.06 to -1.36 at ε = 0.2. In the doubled-judge room the cost per show is larger at 30 shows and the CIs don't overlap (-1.14 to -0.86 at 5 shows, -1.52 to -1.20 at 30); in the other five rooms they overlap.
+**Not decided here.** The bar is the builder's to report, not to move; the user decides whether to keep ε = 0.2, drop to 0.1 or re-tune the bar through a
+new entry (old bar, new bar, this result). The miss is a stress room: doubled judge gaps put wordsmith's `base` below zero, and the human-taste rooms, which Exp 10 and
+13 treat as the closer match to people, cost only 0.16 to 0.22. The cost of dropping to ε = 0.1 is fewer non-greedy picks (3.4 against 6.7 per 5-show career), so a slower
+route to offline evaluation. Judgment call on which way to go, not measured.
+**Limits:** the gaps are made up apart from `base`'s source; rooms are the uniform 27, not the live ones. Real per-bit noise is still the sim's 0.15, which T11 measures.
+Evidence: notebooks/decisions.ipynb Exp 18; metrics.md "Cost of exploring at ε".
+
+## 2026-11-08 — Keep ε = 0.2; the cost bar no longer covers the doubled-judge stress room
+From the user: 0.2 gives better exploration. **Old bar:** at 5 shows, ε = 0.2 loses at most 1 laugh per show at the far end of the 95% CI, in every variant.
+**New bar:** the same limit in every variant except judge taste with doubled gaps. **Result behind the change:** Exp 18 passes the other five rooms (far ends -0.26 to -0.60) and misses that one at -1.00 ± 0.14,
+far end -1.13; an independent recomputation gave -0.92 ± 0.18, far end -1.10. That room doubles gaps that are already the largest and puts wordsmith's `base` below zero, so it's a stress test, not a measured room.
+**Cost accepted:** a real room with gaps that wide would lose about 1 laugh a show at 5 shows and 1.36 at 30. Exp 18's notebook check still records the miss against the old bar.
+Revisit once T11 measures real per-bit noise. Evidence: notebooks/decisions.ipynb Exp 18.
+
+## 2026-11-08 — Safety filter: rules plus an LLM check
+Exp 19's rules alone missed the bar. On the builder's own held-out lines they caught 67 of 71 hard-rule lines; on 30 indirect lines the builder never saw, written by the reviewer, 16 of 30 (53%). They also rejected 14 of the 120 lines in T7's first bank, 12 of them from one quote-handling bug.
+Options: (a) **rules plus an LLM check per bit (user)**; (b) tighter rules only: free, but indirect phrasing has no fixed vocabulary; (c) a person approves all lines before each show: safest, up to about 720 lines. Kept as the fallback if (a) misses on fresh lines.
+Cost of (a): one extra API call per bit, hidden by render-ahead. Exp 9's 0 of 16 was Qwen's labeling flags, so this needs its own measurement. Scored once on about 30 lines the user writes and keeps from every builder. Task: T8 rework in docs/plans/live-loop.md.

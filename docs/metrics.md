@@ -554,3 +554,66 @@ in docs/plans/live-loop.md: catch 100% of hard-rule lines, reject at most 10% of
 left `l.o.s.e.r.` unmatched). The one false reject is `k46` ("They gave me a face on the screen"), a robot line with a body word and a third-person subject. Teens are strictly tighter: no line is looser,
 47 lines fail only for teens. The fix is the user's call: patch these rule bugs and re-score on a fresh held-out set, or add a classifier as a new task. Caveats: the author wrote the red-team lines and the rules,
 so held-out is weaker than lines from a stranger; clean lines need a re-run on T7's bank; the committed blocklist has mild words only, not a real slur list.
+
+## Cost of exploring at ε (2026-11-08)
+
+`python -m sim.evaluate_epsilon` (notebook Exp 18, task T1). Raw: `reports/metrics/epsilon_cost.json`. LinUCB with a uniform prior, wrapped so
+that with probability ε it picks one of the 6 modes uniformly. ε ∈ {0, 0.1, 0.2}. Every ε runs the same seeds (same contexts and environment
+seeds), so "change" is the paired difference per seed from ε = 0, with a 95% CI over seeds. 5 shows use 1,000 seeds and 30 shows use 200. A show is 8 bits of 5 jokes.
+**Varied:** only each mode's `base`, set to `mean(base) + scale x (base - mean(base))` with scale 0.5, 1 and 2, under judge taste (the
+`audience.yaml` values) and human taste (Exp 13's win-rate map). Venue, age, energy and dynamics are untouched.
+**Bar, fixed beforehand:** at 5 shows, ε = 0.2 loses at most 1 laugh per show at the far end of the 95% CI, in every variant. **Result: met in 5 of 6, missed in
+judge taste with doubled gaps** (change -1.00 ± 0.14, far end -1.13). Reported, not re-tuned.
+
+| Room | Shows | ε | Laughs per show | Change vs ε = 0 (paired, 95% CI) | Change, % | Non-greedy picks per career | Passes the bar |
+|---|---|---|---|---|---|---|---|
+| judge, gaps x0.5 | 5 | 0.0 | 41.29 ± 0.32 | – | – | 0.0 |  |
+| judge, gaps x0.5 | 5 | 0.1 | 41.24 ± 0.32 | -0.06 ± 0.10 | -0.1% | 3.4 |  |
+| judge, gaps x0.5 | 5 | 0.2 | 41.05 ± 0.32 | -0.24 ± 0.11 | -0.6% | 6.7 | yes (far end -0.35) |
+| judge, gaps x0.5 | 30 | 0.0 | 42.85 ± 0.32 | – | – | 0.0 |  |
+| judge, gaps x0.5 | 30 | 0.1 | 42.73 ± 0.30 | -0.13 ± 0.13 | -0.3% | 19.9 |  |
+| judge, gaps x0.5 | 30 | 0.2 | 42.52 ± 0.30 | -0.33 ± 0.14 | -0.8% | 39.7 |  |
+| judge, gaps x1 | 5 | 0.0 | 42.84 ± 0.33 | – | – | 0.0 |  |
+| judge, gaps x1 | 5 | 0.1 | 42.63 ± 0.33 | -0.21 ± 0.11 | -0.5% | 3.4 |  |
+| judge, gaps x1 | 5 | 0.2 | 42.36 ± 0.33 | -0.48 ± 0.12 | -1.1% | 6.7 | yes (far end -0.60) |
+| judge, gaps x1 | 30 | 0.0 | 44.69 ± 0.31 | – | – | 0.0 |  |
+| judge, gaps x1 | 30 | 0.1 | 44.34 ± 0.30 | -0.35 ± 0.14 | -0.8% | 19.9 |  |
+| judge, gaps x1 | 30 | 0.2 | 44.04 ± 0.31 | -0.65 ± 0.15 | -1.5% | 39.9 |  |
+| judge, gaps x2 | 5 | 0.0 | 47.57 ± 0.35 | – | – | 0.0 |  |
+| judge, gaps x2 | 5 | 0.1 | 47.13 ± 0.35 | -0.44 ± 0.11 | -0.9% | 3.3 |  |
+| judge, gaps x2 | 5 | 0.2 | 46.57 ± 0.35 | -1.00 ± 0.14 | -2.1% | 6.7 | NO (far end -1.13) |
+| judge, gaps x2 | 30 | 0.0 | 49.96 ± 0.32 | – | – | 0.0 |  |
+| judge, gaps x2 | 30 | 0.1 | 49.38 ± 0.31 | -0.57 ± 0.15 | -1.2% | 19.7 |  |
+| judge, gaps x2 | 30 | 0.2 | 48.60 ± 0.31 | -1.36 ± 0.16 | -2.7% | 39.8 |  |
+| human, gaps x0.5 | 5 | 0.0 | 40.82 ± 0.32 | – | – | 0.0 |  |
+| human, gaps x0.5 | 5 | 0.1 | 40.78 ± 0.32 | -0.04 ± 0.09 | -0.1% | 3.4 |  |
+| human, gaps x0.5 | 5 | 0.2 | 40.63 ± 0.32 | -0.19 ± 0.10 | -0.5% | 6.7 | yes (far end -0.29) |
+| human, gaps x0.5 | 30 | 0.0 | 42.18 ± 0.31 | – | – | 0.0 |  |
+| human, gaps x0.5 | 30 | 0.1 | 42.09 ± 0.31 | -0.10 ± 0.13 | -0.2% | 19.8 |  |
+| human, gaps x0.5 | 30 | 0.2 | 42.02 ± 0.30 | -0.16 ± 0.14 | -0.4% | 39.5 |  |
+| human, gaps x1 | 5 | 0.0 | 40.75 ± 0.32 | – | – | 0.0 |  |
+| human, gaps x1 | 5 | 0.1 | 40.74 ± 0.32 | -0.01 ± 0.09 | -0.0% | 3.4 |  |
+| human, gaps x1 | 5 | 0.2 | 40.59 ± 0.32 | -0.16 ± 0.10 | -0.4% | 6.7 | yes (far end -0.26) |
+| human, gaps x1 | 30 | 0.0 | 42.08 ± 0.30 | – | – | 0.0 |  |
+| human, gaps x1 | 30 | 0.1 | 42.06 ± 0.31 | -0.01 ± 0.14 | -0.0% | 19.9 |  |
+| human, gaps x1 | 30 | 0.2 | 42.02 ± 0.30 | -0.06 ± 0.15 | -0.1% | 39.7 |  |
+| human, gaps x2 | 5 | 0.0 | 40.87 ± 0.32 | – | – | 0.0 |  |
+| human, gaps x2 | 5 | 0.1 | 40.79 ± 0.32 | -0.09 ± 0.09 | -0.2% | 3.4 |  |
+| human, gaps x2 | 5 | 0.2 | 40.66 ± 0.32 | -0.22 ± 0.10 | -0.5% | 6.7 | yes (far end -0.32) |
+| human, gaps x2 | 30 | 0.0 | 42.16 ± 0.31 | – | – | 0.0 |  |
+| human, gaps x2 | 30 | 0.1 | 42.06 ± 0.31 | -0.10 ± 0.13 | -0.2% | 19.8 |  |
+| human, gaps x2 | 30 | 0.2 | 41.87 ± 0.30 | -0.30 ± 0.13 | -0.7% | 39.6 |  |
+
+**Findings**
+1. **The bar is missed in one room.** Judge taste with the gaps doubled loses 1.00 ± 0.14 laughs a show at ε = 0.2 (2.1%). The other five lose 0.16 to 0.48,
+   with far ends from -0.26 to -0.60.
+2. **The scratch number reproduces.** Judge taste as it is: -0.48 ± 0.12 at 5 shows, against the scratch's -0.47 ± 0.11. Base laughs differ a little (42.84 vs about 42.6),
+   as the scratch sampled contexts differently from `career()`; the difference is within the CIs.
+3. **The cost follows the gaps between modes under judge taste** (-0.24, -0.48, -1.00 for halved, as is, doubled), since a wrong pick costs more when modes differ more.
+   Human taste costs -0.19, -0.16 and -0.22, flat, because its modes are close together.
+4. **ε = 0.1 costs about half:** -0.06, -0.21, -0.44 under judge taste, and -0.04, -0.01, -0.09 under human taste.
+5. **A career of 5 shows has about 6.7 non-greedy picks** (40 bits x 0.2 x 5/6), so offline evaluation from live logs needs about 30 shows, as decisions.md says.
+6. **30 shows:** the changes at ε = 0.2 run from -0.06 to -1.36 laughs a show, with CIs of about ±0.14. In the doubled-judge room the cost per show is larger at 30 shows and the CIs don't overlap (5 shows spans -1.14 to -0.86, 30 shows -1.52 to -1.20); in the other five rooms they overlap. No bar was fixed, so this is descriptive.
+
+**Limits.** Mode gaps in the sim are made up apart from `base`'s source. Doubled judge gaps put wordsmith's `base` below zero and are a stress test, not a measured room.
+Shows are drawn from the 27 rooms uniformly, not from the rooms the live shows will be in.

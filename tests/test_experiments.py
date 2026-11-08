@@ -1,4 +1,11 @@
-"""Experiment functions behind notebooks/decisions.ipynb: cache semantics and tiny runs."""
+"""Experiment functions behind the notebooks/decisions-*.ipynb notebooks: cache semantics and tiny runs."""
+import ast
+import importlib
+import json
+import pathlib
+import re
+import sys
+
 import pytest
 
 from sim import cache, evaluate_env, evaluate_policies, evaluate_shift
@@ -95,3 +102,43 @@ def test_behaviour_diagnostic_rates():
     for r in res.values():
         assert 0 <= r["repeat_rate"] <= 1 and 0 <= r["hurt_pick_rate"] <= 1
     assert "Repeats" in evaluate_shift.table_behaviour(res)
+
+
+NOTEBOOKS = pathlib.Path(__file__).resolve().parent.parent / "notebooks"
+
+
+def _section_exps():
+    return [n for p in sorted(NOTEBOOKS.glob("decisions-*.ipynb"))
+            for c in json.loads(p.read_text(encoding="utf-8"))["cells"] if c["cell_type"] == "markdown"
+            for m in [re.match(r"##\s*Exp (\d+)", "".join(c["source"]))] if m for n in [int(m.group(1))]]
+
+
+def test_each_experiment_number_is_in_exactly_one_notebook():
+    exps = _section_exps()
+    assert len(exps) == len(set(exps)) > 0
+    assert not any(re.match(r"##\s*Exp \d+", "".join(c["source"]))
+                   for c in json.loads((NOTEBOOKS / "decisions.ipynb").read_text(encoding="utf-8"))["cells"]
+                   if c["cell_type"] == "markdown")
+
+
+def test_every_index_evidence_entry_resolves_to_a_section():
+    index = json.loads((NOTEBOOKS / "decisions.ipynb").read_text(encoding="utf-8"))
+    cell = next("".join(c["source"]) for c in index["cells"] if "".join(c["source"]).startswith("EVIDENCE = {"))
+    evidence = ast.literal_eval(cell[cell.index("{"):cell.index("\n}") + 2])
+    exps = set(_section_exps())
+    assert evidence and all(int(re.match(r"Exp (\d+) ", v).group(1)) in exps for v in evidence.values())
+
+
+def test_decisions_common_matches_the_old_setup_cell(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(NOTEBOOKS))
+    monkeypatch.chdir(NOTEBOOKS)
+    sys.modules.pop("decisions_common", None)
+    common = importlib.import_module("decisions_common")
+    root = NOTEBOOKS.parent
+    assert common.ROOT == root and pathlib.Path.cwd() == root and str(root) in sys.path
+    assert common.RERUN is False
+    shown = []
+    monkeypatch.setattr(common, "display", shown.append)
+    assert common.check("claim", True) is True and common.check("other", False) is False
+    assert [m.data for m in shown] == ["✅ **claim**", "❌ **other**"]
+    assert {n: [nb for _, nb in v] for n, v in common.sections().items()}[1] == ["decisions-data.ipynb"]

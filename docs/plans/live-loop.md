@@ -29,9 +29,11 @@ to need something else, stop and say so.
 - **Tests:** test what the code guarantees, not its shape. Synthetic data only.
 - **Run both test suites:** `.venv/Scripts/python -m pytest tests -q` skips backend tests because the root venv has no
   FastAPI, so also run `backend/.venv/Scripts/python -m pytest ../tests/test_show_loop.py -q` from `backend/`.
-- **Experiments:** a `run(**params)` called through `sim.cache.run_or_load`, a section in `notebooks/decisions.ipynb`
+  The backend venv must be Python 3.12 (see `backend/README.md`): the plan assumed `backend/.venv` was one, and it was a stale
+  3.14 venv with no numpy or kokoro (dev-log, 2026-11-08).
+- **Experiments:** a `run(**params)` called through `sim.cache.run_or_load`, a section in the right `notebooks/decisions-*.ipynb` (director, data or live; the index is `decisions.ipynb`)
   with ✅/❌ checks, an entry in the `COVERAGE` table of `notebooks/decision-plot.ipynb`, results in `docs/metrics.md`.
-  Run `python scripts/run_notebook.py` for both notebooks. Exp 17 is reserved for issue #38, so numbering here starts at 18.
+  Run `python scripts/run_notebook.py` (every decisions notebook and decision-plot). Exp 17 is reserved for issue #38, so numbering here starts at 18.
 - **The pass criterion in the task is fixed for builders.** If a result misses it, report the miss and don't move the bar. The bars are
   a first estimate: the user may re-tune one when an experiment shows it was wrong, through a new decisions.md entry giving the old bar, the new bar and the result behind the change.
 - **Records:** decisions go in `docs/decisions.md` (append only). Any bug or quirk that cost time goes in `docs/dev-log.md`.
@@ -118,6 +120,7 @@ Runs in parallel once T0 is merged: T1, T2, T7, T8.
 | T9 | Gemini generator, render-ahead, Exp 20 | T4, T7, T8 |
 | T10 | Consent and raw audio, Exp 21 | T6 |
 | T11 | Rating and acceptance run | T6, T9, T10 |
+| T12 | One decisions notebook per section | T1 |
 
 ### T1: ε director and Exp 18
 
@@ -190,6 +193,14 @@ Runs in parallel once T0 is merged: T1, T2, T7, T8.
 - **Experiment:** write the red-team list first (at least 100 lines across categories, including indirect phrasing), then measure.
 - **Pass:** catches 100% of the hard-rule lines; rejects at most 10% of T7's bank, or of a clean list if T7 hasn't merged. A miss goes to the user with the failing categories; the fix may be a classifier as a new task.
 
+### T8 rework: rules plus an LLM check
+
+- **Goal:** catch indirect phrasing the rules can't. Replaces the rules-only result on the unopened `feat/t8-safety-filter` branch. Needs T7 and T12.
+- **Fix in the rules:** words capitalized after an opening quote or inside a quoted sentence are not names; the spaced-letter join must not swallow a lone article; possessives match their base word; fictional names in the bank are allowed.
+- **Build:** after the rules, one LLM call per bit judges all surviving candidates, through the same OpenAI-compatible client as T9. A timeout, a malformed reply, a provider safety block or a missing verdict means rejected. A real slur list loads from a gitignored local file, and a live show refuses to start without it.
+- **Experiment:** Exp 19 re-run on the real bank and the existing red-team list, then scored once on the user's fresh lines, which no builder sees. Rule changes after that score need new lines.
+- **Pass:** 100% of hard-rule lines caught on the fresh lines; at most 10% of the real bank rejected; the check adds at most 2 s per bit; fits the free quota for 5 shows in a day. A miss goes to the user, and option (c) in decisions.md is the fallback.
+
 ### T9: Gemini generator, render-ahead, Exp 20
 
 - **Goal:** a generated show that keeps its timing.
@@ -215,6 +226,16 @@ Runs in parallel once T0 is merged: T1, T2, T7, T8.
 - **Build:** a 1–5 rating at the end of a show, logged as `rating`.
 - **Pass:** 3 simulated shows in a row with no intervention, and 1 full live show with all rows valid. After the first real show, report the label spread: if one key takes more than 60% of presses, stop and fix the rubric or generator (judgment call).
   Measure real per-bit reward noise against the sim's 0.15, and rerun Exp 18 if it differs by more than half.
+
+### T12: One decisions notebook per section
+
+- **Goal:** the evidence notebook stops growing without limit. No result changes.
+- **Files:** new `notebooks/decisions-data.ipynb` (Exp 1, 2, 9 to 12), `notebooks/decisions-director.ipynb` (Exp 3 to 8, 13 to 16, 18), `notebooks/decisions-live.ipynb` (from Exp 19), new `notebooks/decisions_common.py`, `scripts/run_notebook.py`, `notebooks/decision-plot.ipynb`, and every doc that points at the notebook.
+  `notebooks/decisions.ipynb` shrinks to the index: the decision table, with links into each section notebook. Judge, SFT and DPO get `decisions-model.ipynb` when their first experiment lands.
+- **Build:** move cells unchanged, keeping experiment numbers. Shared setup (`ROOT`, `show`, `check`) moves to the common module. `run_notebook.py` with no path runs all of them. `COVERAGE` reads experiments from every `decisions-*.ipynb`. Update `CLAUDE.md`, the PR template, the plan's brief, `README.md`, `docs/status.md` and `docs/study-guide.md`. Leave historical decisions.md entries as written.
+- **Tests:** a test that each Exp number appears in exactly one notebook, and that every index entry resolves.
+- **Experiment:** none. **Pass:** the same set of checks before and after (name and count), and no file under `reports/metrics/` changes.
+- **Order:** starts after T1 merges, and before T8's rework, so the notebooks don't conflict.
 
 ## Later stages (planned after T11)
 

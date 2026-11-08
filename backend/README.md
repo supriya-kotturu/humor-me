@@ -52,3 +52,5 @@ backend/.venv/Scripts/python scripts/latency_probe.py --runs 5   # from repo roo
 
 Python note: audio/ML wheels (faster-whisper, torch) may lag on 3.14. If installs fail in
 week 5, recreate this venv with 3.12 or 3.13.
+
+`app/bank/` holds `bank-v1.yaml`, 120 hand-written lines (6 modes x 4 bits x 5 jokes), and `BankGenerator`: model-free material for tests, calibration and outages.

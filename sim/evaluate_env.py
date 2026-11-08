@@ -7,7 +7,7 @@ Usage:
 
 Answers: is there anything to learn (oracle vs best fixed mode vs random), does the best
 mode differ by venue, and how many bits (and shows) a learner needs to tell the top two
-modes apart. Importable: run(), table() (used by notebooks/decisions.ipynb).
+modes apart. Importable: run(), table() (used by notebooks/decisions-director.ipynb).
 """
 import argparse
 import copy

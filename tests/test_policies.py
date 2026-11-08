@@ -3,7 +3,9 @@ import numpy as np
 import pytest
 
 from sim.env import AudienceEnv, Context
-from sim.policies import N_FEATURES, EpsilonGreedy, LinTS, LinUCB, Random, features, n_features, prior_means
+from sim.evaluate_policies import career
+from sim.policies import (N_FEATURES, EpsilonGreedy, EpsilonSoft, Fixed, LinTS, LinUCB, Random, features, n_features,
+                          prior_means)
 
 BAR = Context("bar", "normal", "mixed")
 
@@ -142,3 +144,83 @@ def test_large_kappa_behaves_like_the_career_model():
             slow.update(o, a, r)
             plain.update(o, a, r)
             o = nxt
+
+
+K = 6
+
+
+def test_epsilon_soft_probs_follow_the_formula_and_sum_to_one():
+    p = EpsilonSoft(Fixed(2), 0.2, K).probs(obs())
+    assert p.sum() == pytest.approx(1)
+    assert p[2] == pytest.approx(1 - 0.2 + 0.2 / K)
+    assert np.delete(p, 2) == pytest.approx(np.full(K - 1, 0.2 / K))
+
+
+def test_epsilon_soft_empirical_pick_rates_match_probs():
+    pol = EpsilonSoft(Fixed(2), 0.2, K, seed=1)
+    n = 60_000
+    picks = np.bincount([pol.act(obs()) for _ in range(n)], minlength=K) / n
+    tol = 5 * np.sqrt((1 - 0.2 + 0.2 / K) * (0.2 - 0.2 / K) / n)  # 5 sigma at the largest probability
+    assert picks == pytest.approx(pol.probs(obs()), abs=tol)
+    assert pol.explored == pytest.approx(n * 0.2 * (K - 1) / K, rel=0.03)
+
+
+def test_epsilon_soft_probs_put_the_mass_on_the_inner_greedy_mode():
+    env = AudienceEnv()
+    inner = LinUCB(prior_means(env, "uniform"))
+    pol = EpsilonSoft(inner, 0.2, K)
+    o = env.reset(BAR, seed=0)
+    for _ in range(6):
+        a = inner.act(o)
+        assert pol.probs(o).argmax() == a
+        nxt, r, *_ = env.step(a)
+        inner.update(o, a, r)
+        o = nxt
+
+
+def test_epsilon_soft_decide_reports_one_consistent_decision_with_a_stochastic_inner_policy():
+    env = AudienceEnv()
+    pol = EpsilonSoft(LinTS(prior_means(env, "uniform"), seed=3), 0.2, K, seed=4)
+    o = env.reset(BAR, seed=0)
+    greedy_seen = set()
+    for _ in range(8):
+        action, greedy, probs = pol.decide(o)
+        greedy_seen.add(greedy)
+        assert probs.argmax() == greedy
+        assert probs[greedy] == pytest.approx(1 - 0.2 + 0.2 / K) and probs.sum() == pytest.approx(1)
+        nxt, r, *_ = env.step(action)
+        pol.update(o, action, r)
+        o = nxt
+    assert len(greedy_seen) > 1  # the inner policy really is stochastic, so a second query would have disagreed
+
+
+def test_epsilon_zero_is_exactly_plain_linucb():
+    def plain(env, s):
+        return LinUCB(prior_means(env, "uniform", seed=s), seed=s)
+
+    def wrapped(env, s):
+        return EpsilonSoft(plain(env, s), 0.0, env.n_modes, seed=s + 10_000)
+
+    for seed in range(3):
+        (la, lo), (wa, wo) = career(plain, 4, seed), career(wrapped, 4, seed)
+        assert np.array_equal(la, wa) and np.array_equal(lo, wo)
+
+
+def test_epsilon_zero_never_explores_and_epsilon_one_is_uniform():
+    pol = EpsilonSoft(Fixed(0), 0.0, K)
+    assert [pol.act(obs()) for _ in range(200)] == [0] * 200 and pol.explored == 0
+    assert EpsilonSoft(Fixed(0), 1.0, K).probs(obs()) == pytest.approx(np.full(K, 1 / K))
+
+
+def test_epsilon_soft_update_passes_through_unchanged():
+    env = AudienceEnv()
+    a, b = (LinUCB(prior_means(env, "uniform")) for _ in range(2))
+    o = env.reset(BAR, seed=0)
+    EpsilonSoft(a, 0.2, K).update(o, 3, 0.4)
+    b.update(o, 3, 0.4)
+    assert np.array_equal(a.A, b.A) and np.array_equal(a.b, b.b)
+
+
+def test_epsilon_soft_rejects_eps_outside_the_unit_interval():
+    with pytest.raises(ValueError):
+        EpsilonSoft(Fixed(0), 1.1, K)

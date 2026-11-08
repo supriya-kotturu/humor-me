@@ -296,3 +296,43 @@ class LinTS(_Linear):
             theta = self.rng.multivariate_normal(A_inv @ self.b[a], self.v**2 * A_inv)
             scores.append(theta @ self._x(obs, a))
         return int(np.argmax(scores))
+
+
+class EpsilonSoft:
+    """ε-soft wrapper: with probability ε, pick uniformly among all modes, otherwise the inner policy's choice.
+
+    A deterministic policy can't say how likely it was to pick anything else, so its logs can't score another
+    director offline. This one can: the greedy mode has probability 1 − ε + ε/K and every other mode ε/K.
+    Exploration draws come from the wrapper's own RNG, so ε = 0 never touches the inner policy's and is exactly it.
+
+    `decide(obs)` queries the inner policy once and returns the action, the greedy mode and the probabilities of that
+    one decision; log those. `probs(obs)` alone re-queries the inner policy, so it only agrees with a later `act` when
+    the inner policy is deterministic (LinUCB is, LinTS is not).
+    """
+
+    def __init__(self, inner, eps: float, n_arms: int, seed: int | None = 0):
+        if not 0 <= eps <= 1:
+            raise ValueError(f"eps {eps} not in [0, 1]")
+        self.inner, self.eps, self.n = inner, eps, n_arms
+        self.rng = np.random.default_rng(seed)
+        self.explored = 0  # picks that differ from the greedy mode
+
+    def _probs(self, greedy: int) -> np.ndarray:
+        p = np.full(self.n, self.eps / self.n)
+        p[greedy] += 1 - self.eps
+        return p
+
+    def probs(self, obs) -> np.ndarray:
+        return self._probs(self.inner.act(obs))
+
+    def decide(self, obs) -> tuple[int, int, np.ndarray]:
+        greedy = self.inner.act(obs)
+        action = int(self.rng.integers(self.n)) if self.rng.random() < self.eps else greedy
+        self.explored += action != greedy
+        return action, greedy, self._probs(greedy)
+
+    def act(self, obs) -> int:
+        return self.decide(obs)[0]
+
+    def update(self, obs, action, reward):
+        self.inner.update(obs, action, reward)

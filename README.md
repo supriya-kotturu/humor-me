@@ -21,7 +21,7 @@ never as text the model imitates.
 | [`frontend/`](frontend/README.md) | Next.js UI: waveform avatar, operator panel | Scaffold | [README](frontend/README.md) |
 | [`scripts/`](scripts/README.md) | One-off tools: paper PDF → markdown, LLM latency probe | Active | [README](scripts/README.md) |
 | [`docs/`](docs/README.md) | Design, roadmap, data sources, pipeline spec, decision log | Active | [README](docs/README.md) · [wiki](docs/wiki/README.md) |
-| [`notebooks/`](notebooks/decisions.ipynb) | **Decision notebook**: re-runs the experiment behind every decision, with claim checks | Active | [decisions.ipynb](notebooks/decisions.ipynb) |
+| [`notebooks/`](notebooks/decisions.ipynb) | **Decision notebooks**: `decisions.ipynb` indexes every decision; `decisions-data`, `decisions-director` and `decisions-live` re-run the experiments behind them, with claim checks | Active | [decisions.ipynb](notebooks/decisions.ipynb) |
 | [`explorer/`](explorer/README.md) | GPU batch jobs on Northeastern's Explorer cluster | Ready, not run | [README](explorer/README.md) |
 | [`references/`](references/md/README.md) | Reference papers (local only) and their markdown conversions | Local | [README](references/md/README.md) |
 

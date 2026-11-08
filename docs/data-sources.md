@@ -17,7 +17,7 @@ the primary dataset**; everything below is a cold-start aid.
 
 | Source | Decision | Why |
 |---|---|---|
-| scrapsfromtheloft transcripts | **Deferred.** Optional local-only style analysis (set structure, callbacks, tags) | Fan transcripts of copyrighted specials. Never redistribute, never train a released model on them. Check ToS/robots.txt before any scraping. |
+| scrapsfromtheloft transcripts | **Permitted by the site admin (2026-10-23), on conditions.** Local research corpus for structure and laugh labels | Conditions: about 30 to 50 specials, local only, not redistributed, not published, not commercial, fetched slowly, site credited in the report (decisions.md 2026-11-08). The specials stay copyrighted by their owners, so only numbers leave the laptop, and no released model trains on them. |
 | HumorGen dataset | Deferred until public with license | Anonymous repo may disappear. `africa_headlines.tsv` is out-of-domain headline *prompts* (paper App. J), no jokes or ratings. |
 
 If transcripts are used at all, the low-risk use is **aggregate statistics only**, computed

@@ -43,7 +43,7 @@ flowchart LR
         AUD["sim/audience.yaml<br/>room's hidden truth"]:::dataDone
         ENV["sim/env.py<br/>8 bits x 5 jokes, 0-3 laughs"]:::rlDone
         POL["sim/policies.py<br/>fixed, random, eps-greedy,<br/>LinUCB, LinTS"]:::rlDone
-        NB["notebooks/decisions.ipynb<br/>Exp 1-7, 24/24 checks"]:::infraDone
+        NB["notebooks/decisions*.ipynb<br/>Exp 1-16 and 18, all checks pass"]:::infraDone
         SSB["Show state B<br/>two timescales"]:::rlTodo
         SSC["Show state C<br/>MDP + callbacks"]:::rlTodo
         PIPE["Transcript pipeline S0-S6<br/>paused, bits F1 0.80"]:::dataDone
@@ -511,7 +511,7 @@ small? Why can't DPO fix a judge with the wrong taste?
 ## 3. Experiments: the chain of evidence
 
 Every experiment is `run(**params)` → `sim.cache.run_or_load` → a section in
-[notebooks/decisions.ipynb](../notebooks/decisions.ipynb). Full tables: [metrics.md](metrics.md).
+a `notebooks/decisions-*.ipynb` section notebook, indexed in [notebooks/decisions.ipynb](../notebooks/decisions.ipynb). Full tables: [metrics.md](metrics.md).
 
 ```mermaid
 %%{init: {"theme": "default"}}%%
@@ -688,7 +688,7 @@ need: 3.4 jokes/s × 30k = ~2.5 h, inside the 8 h cap; (4) design for no node af
 python -m sim.evaluate_env                              # env sanity metrics (Exp 1-3)
 python -m sim.evaluate_policies                         # policies x priors, ~3 min (Exp 4)
 python -m sim.evaluate_shift                            # mid-set shift (Exp 5)
-python scripts/run_notebook.py                          # re-run decisions.ipynb; required before committing it
+python scripts/run_notebook.py                          # re-run every decisions*.ipynb and decision-plot; required before committing them
 python scripts/sync_wiki.py                             # mirror docs/wiki to the GitHub wiki, after merges
 python -m pipeline.rjokes                               # R1 prep -> data/processed/rjokes/ (expect after_length 402981)
 backend/.venv/Scripts/python scripts/latency_probe.py --runs 5   # LLM TTFT vs backend/.env

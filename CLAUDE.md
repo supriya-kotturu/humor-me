@@ -15,10 +15,12 @@ Read before working:
 - [docs/pipeline.md](docs/pipeline.md) — transcript → beats/bits/sets pipeline, labels, schemas
 - [docs/roadmap.md](docs/roadmap.md) — stages, exit criteria, estimates
 - [docs/decisions.md](docs/decisions.md) — decision log; append, don't rewrite history
-- [notebooks/decisions.ipynb](notebooks/decisions.ipynb) — **evidence for every decision**: one section
-  per experiment-backed decision, re-runnable, with ✅/❌ claim checks. **Every experiment is a
-  `run(**params)` function called via `sim.cache.run_or_load`, and gets a notebook section in the
-  same PR.** Run `python scripts/run_notebook.py` before committing the notebook.
+- [notebooks/decisions.ipynb](notebooks/decisions.ipynb) — **index of the evidence for every decision**, linking each
+  to a section notebook: `decisions-data.ipynb` (transcripts, rJokes), `decisions-director.ipynb` (sim, director),
+  `decisions-live.ipynb` (live loop, Exp 19 onward); judge, SFT and DPO get `decisions-model.ipynb` with their first
+  experiment. One section per experiment-backed decision, re-runnable, with ✅/❌ claim checks; Exp numbers are global.
+  **Every experiment is a `run(**params)` function called via `sim.cache.run_or_load`, and gets a section in the
+  right notebook in the same PR.** Run `python scripts/run_notebook.py` (all notebooks) before committing.
 - [notebooks/decision-plot.ipynb](notebooks/decision-plot.ipynb) — **the decisions as charts.** Every experiment gets an
   entry in its `COVERAGE` table in the same PR: its figures, or the reason it has none. A missing entry fails the
   notebook's check. Run `python scripts/run_notebook.py notebooks/decision-plot.ipynb` before committing it.

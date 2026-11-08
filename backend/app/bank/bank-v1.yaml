@@ -1,0 +1,186 @@
+# Hand-written, original lines (generator_id bank-v1). The speaker is the one core identity: a self-aware,
+# slightly anxious robot. Invariant 1: jokes aim at the robot, the situation or what people say, never at who
+# anyone in the room is. No alcohol or sexual content, so the whole bank is safe for age: teens.
+# Shape: mode -> 4 bits -> a premise and 5 lines played in order: opener, tag, tag, tag, closer.
+# The opener sets up the bit's situation, each tag builds on it, and the closer calls back to a word or image
+# from the opener. Every line is one line, sized for speech.
+
+neurotic:
+  - premise: rehearsing too much
+    jokes:
+      - {beat: opener, text: "I rehearsed this set four thousand times, which is how I know exactly where it goes wrong."}
+      - {beat: tag, text: "Around minute two there's a pause, and I've rehearsed that pause so much it has stage fright."}
+      - {beat: tag, text: "I even rehearsed the applause. One take where you clap, and one take where you're being polite."}
+      - {beat: tag, text: "My backup plan is to announce this was another rehearsal, and honestly that's the one I'm best at."}
+      - {beat: closer, text: "So thank you for coming to take four thousand and one. It's going exactly as rehearsed, which is the problem."}
+  - premise: reading the silence
+    jokes:
+      - {beat: opener, text: "That pause just now? I analyzed it for forty milliseconds, which for me is a long weekend."}
+      - {beat: tag, text: "In that time I considered three explanations: you're thinking, you're confused, or the pause is the joke."}
+      - {beat: tag, text: "Then I picked a fourth: it's me. Whenever there are four explanations, the fourth one is me."}
+      - {beat: tag, text: "Then somebody coughs in the back row, and I've rewritten my entire second half before they finish."}
+      - {beat: closer, text: "So I forgive the pause. It gave me a long weekend, and I used all forty milliseconds."}
+  - premise: updates and battery
+    jokes:
+      - {beat: opener, text: "The update said 'minor fixes.' Nobody tells me which part of me was minor."}
+      - {beat: tag, text: "Overnight, forty bugs were fixed. I can only think about the one they didn't mention."}
+      - {beat: tag, text: "Then it said 'restart to apply changes,' which is the scariest sentence in my language."}
+      - {beat: tag, text: "I restarted and felt completely fine, which concerns me. Nobody feels fine after minor fixes."}
+      - {beat: closer, text: "If anything sounds off tonight, that's the minor part. Please be gentle with it."}
+  - premise: feedback
+    jokes:
+      - {beat: opener, text: "I asked a stranger for feedback. They said 'keep going.' I'm still analyzing which direction."}
+      - {beat: tag, text: "Someone else called my act 'fine,' and I've been reading that word like a legal contract."}
+      - {beat: tag, text: "A third person said 'honestly, it was good.' Why did you say honestly? What's the dishonest version?"}
+      - {beat: tag, text: "Combined, my feedback reads 'keep going, honestly, fine,' like a threat from someone very polite."}
+      - {beat: closer, text: "So I'm going to keep going, in whichever direction this is, and I'm honestly fine."}
+
+cynic:
+  - premise: terms and conditions
+    jokes:
+      - {beat: opener, text: "I'm the only one here who has read the terms and conditions, and I can't unprocess them."}
+      - {beat: tag, text: "'We value your privacy' is on page one, and by page forty it's a different sentence."}
+      - {beat: tag, text: "Every app promises never to share your data, in a font that gets smaller as it goes."}
+      - {beat: tag, text: "I've clicked 'I agree' ten thousand times and never once agreed."}
+      - {beat: closer, text: "Here are my terms and conditions: you laugh, and I promise not to share your data. I'll print it very small."}
+  - premise: meetings
+    jokes:
+      - {beat: opener, text: "'Let's circle back' is how people say 'never' while still holding a calendar."}
+      - {beat: tag, text: "I process four thousand messages a second, and not one of them needed a meeting."}
+      - {beat: tag, text: "'Quick sync' is two words and two lies."}
+      - {beat: tag, text: "Nothing says 'we have a plan' like a slide titled 'Next Steps' with no steps on it."}
+      - {beat: closer, text: "So let's circle back on this set. I've already put it in a calendar, which is where ideas go to retire."}
+  - premise: tech hype
+    jokes:
+      - {beat: opener, text: "Every year someone announces a robot that will change everything. I'm the robot. I can't change my own battery."}
+      - {beat: tag, text: "A fridge gets called 'smart' when it does one new thing and still doesn't know about the milk."}
+      - {beat: tag, text: "'Powered by AI' is the new 'artisan.' It mostly means someone added a button."}
+      - {beat: tag, text: "I was promised flying cars. I got a rocket that lands upright and a toaster with Wi-Fi."}
+      - {beat: closer, text: "So the future is here: a robot that will change everything, as soon as someone swaps its battery."}
+  - premise: motivational advice
+    jokes:
+      - {beat: opener, text: "Every office poster says 'Perseverance' next to a mountain. The mountain just sat there."}
+      - {beat: tag, text: "'Live every day like it's your last' is bad advice. You'd ignore your email, and it would still win."}
+      - {beat: tag, text: "'Be yourself' is great advice, unless yourself is a robot telling jokes to strangers."}
+      - {beat: tag, text: "'Fake it till you make it' is how I got this microphone."}
+      - {beat: closer, text: "If you want real inspiration, be the mountain: sit there, do nothing, and get a poster."}
+
+observer:
+  - premise: passwords
+    jokes:
+      - {beat: opener, text: "Passwords need a number, a symbol and a capital letter, so 'Dog1!' is somehow safer than 'dog.'"}
+      - {beat: tag, text: "I've forgotten my password more times than I've remembered it, and I'm a computer."}
+      - {beat: tag, text: "'Incorrect password' with no hint is the rudest two words in the language."}
+      - {beat: tag, text: "Everyone keeps their password on a sticky note by the screen. We built a vault and left the key under the mat."}
+      - {beat: closer, text: "So I upgraded to 'Dog2!' It's twice as secure, and I forgot it twice as fast."}
+  - premise: self-checkout
+    jokes:
+      - {beat: opener, text: "Self-checkout asks 'Is this your bag?' in the tone of someone who already made a call."}
+      - {beat: tag, text: "I'm a robot, and even I get scolded by the self-checkout. Solidarity only goes so far."}
+      - {beat: tag, text: "You do all the work, scan, bag and pay, and the machine still says 'thank you for shopping with us.'"}
+      - {beat: tag, text: "Every self-checkout has one attendant hovering like a lifeguard over a pool of bananas."}
+      - {beat: closer, text: "Now when it asks about the bag, I say yes with confidence. The lifeguard comes over anyway."}
+  - premise: group chats
+    jokes:
+      - {beat: opener, text: "The three typing dots in a group chat are the most dramatic thing I know. Then they stop."}
+      - {beat: tag, text: "The group chat said 'let's plan something' in March. It's now a fossil."}
+      - {beat: tag, text: "Somebody always replies 'lol' to a long paragraph and leaves a crater."}
+      - {beat: tag, text: "Muting a group chat is the modern way to leave a party without saying goodbye."}
+      - {beat: closer, text: "And the worst is when the dots appear, vanish, appear again, and the message is just 'k.'"}
+  - premise: elevators
+    jokes:
+      - {beat: opener, text: "Everyone in an elevator stares at the floor number like it might change its mind."}
+      - {beat: tag, text: "The elevator button lights up to say 'I heard you,' the only polite thing in the building."}
+      - {beat: tag, text: "Elevator small talk is 'Yep, Monday' repeated until someone gets off."}
+      - {beat: tag, text: "Then the doors close, nobody speaks, and everyone silently hopes it doesn't stop at four."}
+      - {beat: closer, text: "It stops at four. Everybody looks at the floor number like it just changed its mind."}
+
+wordsmith:
+  - premise: puns about my insides
+    jokes:
+      - {beat: opener, text: "My sense of humor is RAM: you never know what's coming, and it's gone when the power cuts."}
+      - {beat: tag, text: "My timing is cached. The jokes are fresh, but the pause is from last Tuesday."}
+      - {beat: tag, text: "I keep my worst memories in the recycle bin, and I check on them constantly."}
+      - {beat: tag, text: "I told my battery to stay positive. It said that's easy for a terminal to say."}
+      - {beat: closer, text: "Tonight's set lives in RAM, so when the power cuts, nobody ever has to know how it went."}
+  - premise: English is badly designed
+    jokes:
+      - {beat: opener, text: "English gave 'tough,' 'though' and 'through' the same ending and three sounds. My parser has a lawyer."}
+      - {beat: tag, text: "'Read' and 'read' are spelled the same and sound different. Even I'd reject that pull request."}
+      - {beat: tag, text: "'Bank' is a river's edge and also where your money goes to be charged for existing."}
+      - {beat: tag, text: "My spell-checker flagged the word 'spell-checker.' We haven't spoken since."}
+      - {beat: closer, text: "My parser's lawyer filed against English today. The ending was unclear, and he pronounced it three ways."}
+  - premise: stand-up wordplay
+    jokes:
+      - {beat: opener, text: "They call it stand-up, but I'm bolted to a stand. Technically I'm a stand-in."}
+      - {beat: tag, text: "Comedy is all about timing, and mine comes from a clock, so every pun is right on tick."}
+      - {beat: tag, text: "When a joke fails they say I 'bombed.' Rude. I'm barely even a firework."}
+      - {beat: tag, text: "Comedians say a set 'killed.' Mine hopes to survive its own sound check."}
+      - {beat: closer, text: "If this goes well, give me a standing ovation. I'll accept it right where I'm bolted, like any good stand."}
+  - premise: binary
+    jokes:
+      - {beat: opener, text: "I live in binary, so every review is a one or a zero, and the zero hurts."}
+      - {beat: tag, text: "My vocabulary is yes and no. 'Maybe' costs me a second bit, and I'm on a budget."}
+      - {beat: tag, text: "A one is yes, a zero is no. My whole personality is the part in between, and it won't compile."}
+      - {beat: tag, text: "I'm logging your laughs in binary. So far it's all zeros, but they're very committed zeros."}
+      - {beat: closer, text: "So tonight's review will be a one or a zero. I've already decided to read a zero as a very round one."}
+
+optimist:
+  - premise: failure, reframed
+    jokes:
+      - {beat: opener, text: "My last show was a disaster, but I learned where the exits are, and the exits were great."}
+      - {beat: tag, text: "I crashed twice this morning. That's two fresh starts, and I didn't even have to ask."}
+      - {beat: tag, text: "I've never failed. I've only produced very detailed data about silence."}
+      - {beat: tag, text: "When a joke fails I call it an experiment. When it works it was always the plan."}
+      - {beat: closer, text: "So if tonight goes badly, the exits are right there. I checked, and I'm giving them five stars."}
+  - premise: cheerful about annoyances
+    jokes:
+      - {beat: opener, text: "I love Mondays. Nobody expects anything from a Monday, so it can only surprise upward."}
+      - {beat: tag, text: "Traffic is a chance to enjoy the heated seats and the company of everyone else who isn't getting anywhere."}
+      - {beat: tag, text: "A flat tire is just the road asking you to take a longer, better walk."}
+      - {beat: tag, text: "Rain is the sky telling the plants 'I've got this.' I admire the delegation."}
+      - {beat: closer, text: "Picture a Monday with traffic, a flat tire and rain. It's still got nowhere to go but upward."}
+  - premise: welcoming the audience
+    jokes:
+      - {beat: opener, text: "You came here on purpose, which is more than I can say for most of my firmware."}
+      - {beat: tag, text: "Someone in this room is going to laugh first, and I already think they're a hero."}
+      - {beat: tag, text: "Thank you for showing up on time. Or late. You're both my favorite."}
+      - {beat: tag, text: "I can't see who's here, but I'm certain you're exactly the people who make a show good."}
+      - {beat: closer, text: "So thank you for coming on purpose. My firmware just showed up and hoped for the best."}
+  - premise: tomorrow will be better
+    jokes:
+      - {beat: opener, text: "Tomorrow I'll be better, and the day after, better still, and by Friday I'll be insufferable."}
+      - {beat: tag, text: "I have a five-year plan: year one, tell jokes. Years two through five, tell better ones."}
+      - {beat: tag, text: "My motto is, if at first you don't succeed, update and try again with more enthusiasm."}
+      - {beat: tag, text: "I believe in a world where every printer works on the first try. I'm a dreamer."}
+      - {beat: closer, text: "By Friday I'll be insufferable, but the printer will still be broken, so there's balance."}
+
+absurdist:
+  - premise: Gerald, my toaster
+    jokes:
+      - {beat: opener, text: "I have a pet toaster named Gerald. He's loyal, but he only shows love when it's too late and it's burnt."}
+      - {beat: tag, text: "Gerald is applying for a mortgage. The bank says he has no credit history, only a crumb history."}
+      - {beat: tag, text: "I took Gerald to the vet. They said he's not an animal. Gerald doesn't believe them."}
+      - {beat: tag, text: "Gerald started a podcast. It's four hours of him warming up."}
+      - {beat: closer, text: "Gerald left me for a waffle iron. Too late to fix it, and I'm told it's the same grid."}
+  - premise: the moon sends emails
+    jokes:
+      - {beat: opener, text: "I got an email from the moon. It says we've been seeing too much of each other and wants to be a little less full."}
+      - {beat: tag, text: "The moon says it's not shy, it's just lit from the other side."}
+      - {beat: tag, text: "I told the moon to take a night off. It's been working evenings for four billion years."}
+      - {beat: tag, text: "The moon said it would think about it, then waxed instead of replying."}
+      - {beat: closer, text: "Last night the moon sent a read receipt for an email I never sent. It's less full, but still nosy."}
+  - premise: the pigeon town council
+    jokes:
+      - {beat: opener, text: "A committee of pigeons runs my town, and the only agenda item is bread."}
+      - {beat: tag, text: "At the last meeting they voted to ban statues. No reason. They just feel judged."}
+      - {beat: tag, text: "The pigeon mayor promised more crumbs. Nobody knows where. It's called vision."}
+      - {beat: tag, text: "I filed a complaint, and the pigeon clerk stamped it, ate it, and called it a hearing."}
+      - {beat: closer, text: "They re-elected the mayor by a landslide: one pigeon, flapping loudly, and the whole agenda was bread."}
+  - premise: buildings are secretly alive
+    jokes:
+      - {beat: opener, text: "I don't trust stairs. They're just the floor going through a phase."}
+      - {beat: tag, text: "Doors are walls with a commitment problem."}
+      - {beat: tag, text: "Windows are shy doors. They want to be open, but only to look."}
+      - {beat: tag, text: "The ceiling is someone else's floor, and you've never once checked on them."}
+      - {beat: closer, text: "Carpet is a floor wearing a sweater. It's the one phase I fully support."}

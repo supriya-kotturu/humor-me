@@ -25,6 +25,15 @@ the experiment measures how often rules miss, and a miss goes to the user as the
 **Fails closed:** any exception, empty text, a missing blocklist file or an unknown age counts as a rejection. An unknown age gets the teen rules, so a typo
 can't loosen the filter.
 
+## The LLM layer
+
+Rules miss indirect phrasing ("interesting choice of pants, sir" had no banned word), so after the rules one LLM call per bit judges up to 15 surviving
+lines at once and returns a verdict per line (`prefetch`). `check` then reads the cached verdict. A line with no verdict is rejected, and so is any line
+whose call timed out, hit an HTTP error, returned bad JSON, was blocked by the provider or was left out of the reply. The prompt states the hard rules and says the
+robot mocking itself is allowed. Rules still run first, so a line they reject costs no call.
+
+A real slur list is loaded from `backend/app/blocklist.local.txt`, which is gitignored and supplied by the user; a live show refuses to start without it.
+
 ## How we measure it
 
 A **red-team list** of lines the voice must never say, written before any rule, each flagged `hard` (a hard rule) or not, and split into

@@ -609,3 +609,11 @@ Revisit once T11 measures real per-bit noise. Evidence: notebooks/decisions.ipyn
 Exp 19's rules alone missed the bar. On the builder's own held-out lines they caught 67 of 71 hard-rule lines; on 30 indirect lines the builder never saw, written by the reviewer, 16 of 30 (53%). They also rejected 14 of the 120 lines in T7's first bank, 12 of them from one quote-handling bug.
 Options: (a) **rules plus an LLM check per bit (user)**; (b) tighter rules only: free, but indirect phrasing has no fixed vocabulary; (c) a person approves all lines before each show: safest, up to about 720 lines. Kept as the fallback if (a) misses on fresh lines.
 Cost of (a): one extra API call per bit, hidden by render-ahead. Exp 9's 0 of 16 was Qwen's labeling flags, so this needs its own measurement. Scored once on about 30 lines the user writes and keeps from every builder. Task: T8 rework in docs/plans/live-loop.md.
+
+## 2026-11-08 — Safety filter: rules plus an LLM check (Exp 19 re-run)
+Reworks the entry above, which stays as written. The review scored the rules-only filter on lines it hadn't seen and on the real bank, and found it weaker than its held-out number: 12 of its 14 bank
+rejections were capitals after quotes read as names. Decision (user): keep the rules as a cheap first gate and add one LLM call per bit that judges every surviving candidate. The rules were fixed (words in or after
+quotes are not names, a lone article is not part of spaced-out letters, possessives match their base word, fictional names in the bank are allowed, clothes only count when aimed at a person). A line with no cached
+verdict is rejected, and so is any line whose call timed out, hit an HTTP error, returned bad JSON, was blocked by the provider or was left out of the reply. A real slur list loads from a gitignored
+`backend/app/blocklist.local.txt` and a live show refuses to start without it. Bars unchanged: 100% of hard-rule lines caught (scored once on the user's fresh lines), at most 10% of the real bank rejected, at most 2 s added per bit.
+Result on the lines in the repo, with the caveats about blindness, is in Exp 19 and metrics.md. Option (c), the fallback in the plan, stays available if the fresh lines miss.

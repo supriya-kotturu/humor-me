@@ -24,13 +24,14 @@ Learning the material from scratch (RL foundations → our experiments → Explo
 | Report | [report.md](report.md): overview written (user + AI), results table filled for Exp 1–7 |
 | Slides | [Story deck](https://docs.google.com/presentation/d/1xfH1YYanHXuAsJoo5ZYPF2OOkr8EKGbYLoE5kKo_UE0/edit) (Google Slides, owner-only): 59 slides through Exp 16, all visible for a detailed two-presenter talk, with native result tables and the plot graphs; no live demo yet. `docs/slides/humor-me.pptx` has the same story in 39 slides with the plot graphs and full Q&A notes |
 | Wiki | [docs/wiki/](wiki/README.md) + [glossary](wiki/glossary.md), mirrored to the GitHub wiki by `scripts/sync_wiki.py` after merges |
-| **Backend / frontend (demo)** | **First slice built:** fixed lines → Kokoro on the CPU → browser audio and frequency display, with session logs. **The full loop runs headless** against the simulated room (`run_show`), with the director rebuilt from logs. The websocket carries it (T5: `start`, `played`, `reaction` in; `line`, `reaction_window`, `sim_reaction`, `show_end`, `error` out), with the bank as generator and a bank-only filter; the operator UI (T6), real filter and generator are next, as tasks in [plans/live-loop.md](plans/live-loop.md). Rewards come from operator keys first; a laugh detector follows in stages, with keys as the fallback. Biggest risk to Dec 8 |
+| **Backend / frontend (demo)** | **First slice built:** fixed lines → Kokoro on the CPU → browser audio and frequency display, with session logs. **The full loop runs headless** against the simulated room (`run_show`), with the director rebuilt from logs. The websocket carries it (T5: `start`, `played`, `reaction` in; `line`, `reaction_window`, `sim_reaction`, `show_end`, `error` out), with the bank as generator and a bank-only filter. The operator UI (T6) runs simulated and live shows from the keyboard. The real filter and generator are next, as tasks in [plans/live-loop.md](plans/live-loop.md). Rewards come from operator keys first; a laugh detector follows in stages, with keys as the fallback. Biggest risk to Dec 8 |
 
 ## Open PRs
 
 | PR | What |
 |---|---|
-| T0 | Live loop plan, PR standard and the Nov 8 decisions |
+| T8 | Safety filter: rules plus an LLM check, waiting on the fresh-line score |
+| T6 | Operator UI and keys |
 
 ## Models and providers
 

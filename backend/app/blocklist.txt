@@ -1,0 +1,8 @@
+# One lowercase word per line; whole-word match. Mild demeaning words only: the committed list holds no slurs.
+# Add the real slur list locally in a line per word; the mechanism is the same (tests inject a placeholder).
+moron
+idiot
+loser
+dumbass
+imbecile
+scum

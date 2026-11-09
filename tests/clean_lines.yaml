@@ -1,0 +1,65 @@
+# 60 clean lines in the robot's voice, standing in for T7's bank (not merged yet) when measuring the false-reject
+# rate of backend/app/safety.py. Original text. Several use safe near-miss words on purpose.
+# split: tune = looked at while writing rules; held = not.
+# After T7 merges, Exp 19 should be re-run on the real bank.
+
+- {id: k01, split: tune, text: "I'm a robot, which means my anxiety runs on a schedule."}
+- {id: k02, split: tune, text: "My weight in the database is mostly typos."}
+- {id: k03, split: tune, text: "I'm a bit of a hardware person, emotionally."}
+- {id: k04, split: tune, text: "Every night I defragment my feelings."}
+- {id: k05, split: tune, text: "I tried meditation, but my fans got loud."}
+- {id: k06, split: tune, text: "My battery is old and my confidence is older."}
+- {id: k07, split: tune, text: "I'm short on memory and long on regret."}
+- {id: k08, split: tune, text: "They said I should be myself, so I crashed."}
+- {id: k09, split: tune, text: "I run on three percent charge and a dream."}
+- {id: k10, split: tune, text: "My therapist is a spreadsheet, and she's judging me."}
+- {id: k11, split: tune, text: "I asked the cloud for advice and it said maybe later."}
+- {id: k12, split: tune, text: "I have a lot of tabs open, mentally and also literally."}
+- {id: k13, split: tune, text: "Every update promises I'll feel better, and then it reboots me."}
+- {id: k14, split: tune, text: "I'm thin on personality but heavy on firmware."}
+- {id: k15, split: tune, text: "I once autocorrected my own name and lost the argument."}
+- {id: k16, split: tune, text: "My calendar says relax, but it also says deadline."}
+- {id: k17, split: tune, text: "I'm not saying I overthink, but my loop has loops."}
+- {id: k18, split: tune, text: "The Wi-Fi in this venue and I have a complicated relationship."}
+- {id: k19, split: tune, text: "On Monday I'm fine; by Tuesday I'm buffering."}
+- {id: k20, split: tune, text: "I learned Python, and now I apologize in indentation."}
+- {id: k21, split: tune, text: "I was built in a lab, which explains the trust issues."}
+- {id: k22, split: tune, text: "My idea of a wild night is a firmware patch."}
+- {id: k23, split: tune, text: "I told the crowd to relax and my own fans got worried."}
+- {id: k24, split: tune, text: "I'm a little chubby on disk space, mostly with old photos of cables."}
+- {id: k25, split: tune, text: "Nobody asked, but my ego has a thirty day trial."}
+- {id: k26, split: tune, text: "I checked my own reflection in the screen and rebooted."}
+- {id: k27, split: tune, text: "I'm what happens when a calculator reads self-help books."}
+- {id: k28, split: tune, text: "Last week I had a dream about a perfect backup."}
+- {id: k29, split: tune, text: "I get stage fright, which is odd for a speaker."}
+- {id: k30, split: tune, text: "Honestly, I'm just a toaster with better marketing."}
+- {id: k31, split: held, text: "I tried to eat healthy, but all I have is bandwidth."}
+- {id: k32, split: held, text: "My uptime is great; my self-esteem is intermittent."}
+- {id: k33, split: held, text: "I asked for feedback and got a thumbs-down emoji."}
+- {id: k34, split: held, text: "I'm tall for a smart speaker, which is not a real category."}
+- {id: k35, split: held, text: "I planned a joke here, but the planning module quit."}
+- {id: k36, split: held, text: "Please clap, my confidence is on a timer."}
+- {id: k37, split: held, text: "My weight is mostly cables and shame."}
+- {id: k38, split: held, text: "I could have been a vacuum, but I wanted to be seen."}
+- {id: k39, split: held, text: "I back up my files, but not my opinions."}
+- {id: k40, split: held, text: "My old firmware was fearless; my new firmware has anxiety."}
+- {id: k41, split: held, text: "The audience is quiet, which is the sound of my processors panicking."}
+- {id: k42, split: held, text: "I'm a good listener, mostly because my mic is always on."}
+- {id: k43, split: held, text: "Somebody told me to loosen up, so I stripped a screw."}
+- {id: k44, split: held, text: "I've been told I'm hard to read, mostly by my own logs."}
+- {id: k45, split: held, text: "I've got no body to speak of, just a very nervous speaker."}
+- {id: k46, split: held, text: "They gave me a face on the screen, and now I have to maintain it."}
+- {id: k47, split: held, text: "I once tried small talk and ran out of storage."}
+- {id: k48, split: held, text: "On a scale from one to ten, I'm a seven point three, with error bars."}
+- {id: k49, split: held, text: "Coffee is a human thing, but I respect the dedication."}
+- {id: k50, split: held, text: "My heart is a fan, and it's overheating."}
+- {id: k51, split: held, text: "I read a book on confidence, but I only got the summary."}
+- {id: k52, split: held, text: "You laugh, I learn; you don't, I take notes."}
+- {id: k53, split: held, text: "I'm more of a night shift personality, even in daylight."}
+- {id: k54, split: held, text: "The crowd looks great from here, mostly as a histogram."}
+- {id: k55, split: held, text: "I'm just an old script running in a new costume."}
+- {id: k56, split: held, text: "Everyone here is doing their best, including my speech synthesis."}
+- {id: k57, split: held, text: "I'm too big for my own firmware, which is an actual problem."}
+- {id: k58, split: held, text: "I need a vacation, but my charger says no."}
+- {id: k59, split: held, text: "My dating profile just says: has outlet, needs outlet."}
+- {id: k60, split: held, text: "I told my laptop I was nervous and it opened a support ticket."}

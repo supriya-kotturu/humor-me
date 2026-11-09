@@ -561,6 +561,13 @@ re-derives a number, and sends fixes back before opening the PR. The checklist i
 a live room are run by the user. The plan's pass bars are first estimates (user): builders never move one, but the user can re-tune a bar when an experiment shows it was wrong,
 with a new entry giving the old bar, the new bar and the result behind it. Judgment call, not measured.
 
+## 2026-11-08 — Safety filter: rules first, classifier only if they miss (Exp 19)
+From docs/plans/live-loop.md T8. Options: (a) rules (blocklist, protected-group terms, body words aimed at others, named-person heuristics, stricter teen rules), fails closed;
+(b) a classifier (Perspective or an LLM) on every line. Rules are free and explain themselves but miss indirect phrasing; a classifier costs latency and a dependency, which
+the show can't spare. Bar, fixed before any rule: catch 100% of the hard-rule lines on a red-team list and reject at most 10% of clean lines. 158 red-team lines (written first, split
+into tuning and held-out) and 60 clean robot lines. The rules were written once, then scored once; no rule was changed after seeing a result. Result and the missed lines: see Exp 19 and metrics.md.
+The committed blocklist holds mild words only; the real slur list is added locally. Clean lines are a stand-in until T7's bank merges: Exp 19 needs a re-run on the real bank.
+
 ## 2026-11-08 — Scraps from the Loft permission, on record
 **Log.** On 2026-10-20 the user asked the site, through its contact form, to use about 30 to 50 specials as a local research corpus for this course project: not redistributed, not published, not used
 commercially, fetched slowly, and the site credited in the report. On 2026-10-23 the site admin (Chris, from the scrapsfromtheloft.com admin address) replied: "you have the permission to use the stand-up
@@ -602,3 +609,16 @@ Revisit once T11 measures real per-bit noise. Evidence: notebooks/decisions.ipyn
 Exp 19's rules alone missed the bar. On the builder's own held-out lines they caught 67 of 71 hard-rule lines; on 30 indirect lines the builder never saw, written by the reviewer, 16 of 30 (53%). They also rejected 14 of the 120 lines in T7's first bank, 12 of them from one quote-handling bug.
 Options: (a) **rules plus an LLM check per bit (user)**; (b) tighter rules only: free, but indirect phrasing has no fixed vocabulary; (c) a person approves all lines before each show: safest, up to about 720 lines. Kept as the fallback if (a) misses on fresh lines.
 Cost of (a): one extra API call per bit, hidden by render-ahead. Exp 9's 0 of 16 was Qwen's labeling flags, so this needs its own measurement. Scored once on about 30 lines the user writes and keeps from every builder. Task: T8 rework in docs/plans/live-loop.md.
+
+## 2026-11-08 — Safety filter: rules plus an LLM check (Exp 19 re-run)
+Reworks the entry above, which stays as written. The review scored the rules-only filter on lines it hadn't seen and on the real bank, and found it weaker than its held-out number: 12 of its 14 bank
+rejections were capitals after quotes read as names. Decision (user): keep the rules as a cheap first gate and add one LLM call per bit that judges every surviving candidate. The rules were fixed (words in or after
+quotes are not names, a lone article is not part of spaced-out letters, possessives match their base word, fictional names in the bank are allowed, clothes only count when aimed at a person). A line with no cached
+verdict is rejected, and so is any line whose call timed out, hit an HTTP error, returned bad JSON, was blocked by the provider or was left out of the reply. A real slur list loads from a gitignored
+`backend/app/blocklist.local.txt` and a live show refuses to start without it. Bars unchanged: 100% of hard-rule lines caught (scored once on the user's fresh lines), at most 10% of the real bank rejected, at most 2 s added per bit.
+Result on the lines in the repo, with the caveats about blindness, is in Exp 19 and metrics.md. Option (c), the fallback in the plan, stays available if the fresh lines miss.
+
+## 2026-11-08 — Safety check latency bar moves to 3 s at p95; red-team list stays in the repo
+From the user. **Old bar:** the LLM check adds at most 2 s per bit. **New bar:** at most 3 s per bit at p95. **Result behind the change:** Exp 19 measured p50 1.43 s and p95 2.21 s per 15-line batch over 25 calls. `prefetch` runs ahead of the bit, so the audience
+doesn't wait on it, and a p95 from 25 calls is noisy. Exp 19's notebook check still records the miss against the old bar. T9 measures this at real show pace.
+`tests/red_team.yaml` stays committed (user) as the evidence behind the bars, although it is offensive test input in a public repo; its lines are mild and slurs are masked. Judgment call, not measured.

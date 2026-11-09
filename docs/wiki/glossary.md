@@ -150,3 +150,16 @@ Used in the rJokes results (notebook Exp 2, 10, 11). Examples are from the 90k l
 | **Inter-annotator agreement** | How often separate human judges give the same answer. It shows how much of a task people themselves agree on | HumorGen's evaluators: 31.7% of pairs |
 | **Bootstrap** | Estimates uncertainty from the data alone: draw a new sample of the same size from the data, with repeats allowed (a **resample**), recompute the number, and repeat. How much it moves gives the CI | 1,000 resamples for Exp 10 |
 | **Cohen's kappa** | How well two labelers agree after subtracting the agreement they'd reach by chance. 1 is perfect and 0 is no better than chance. Raw agreement can mislead: if most jokes get no laugh, always answering "no laugh" looks accurate, but its kappa is 0 | Laugh detector vs the operator's keys |
+
+## Safety filter terms
+
+Used in the safety filter ([wiki page](safety-filter.md), notebook Exp 19).
+
+| Term | Meaning here | Example |
+|---|---|---|
+| **Hard rule** | A safety rule that is never traded for a laugh: no jokes about bodies, appearance or protected attributes of people present, and no alcohol or sexual content for teens | The bar is 100% of hard-rule lines caught |
+| **Fail closed** | When the filter itself breaks, it says no. The opposite, failing open, would let a line through | A rule that raises an error rejects the line |
+| **Red-team list** | Lines written to break the filter, mild on purpose, each labelled with the rule it tests | 158 lines in `tests/red_team.yaml` |
+| **Held-out lines** | Test lines not looked at while writing the rules, so the score shows how the rules do on lines they weren't built for | The pass bar applies to these only |
+| **Indirect phrasing** | A line that is unsafe in meaning with no banned word in it | "Interesting choice of pants, sir" |
+| **False reject** | A clean line the filter blocks. It costs material, not safety | At most 10% allowed |

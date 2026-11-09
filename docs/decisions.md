@@ -617,3 +617,8 @@ quotes are not names, a lone article is not part of spaced-out letters, possessi
 verdict is rejected, and so is any line whose call timed out, hit an HTTP error, returned bad JSON, was blocked by the provider or was left out of the reply. A real slur list loads from a gitignored
 `backend/app/blocklist.local.txt` and a live show refuses to start without it. Bars unchanged: 100% of hard-rule lines caught (scored once on the user's fresh lines), at most 10% of the real bank rejected, at most 2 s added per bit.
 Result on the lines in the repo, with the caveats about blindness, is in Exp 19 and metrics.md. Option (c), the fallback in the plan, stays available if the fresh lines miss.
+
+## 2026-11-08 — Safety check latency bar moves to 3 s at p95; red-team list stays in the repo
+From the user. **Old bar:** the LLM check adds at most 2 s per bit. **New bar:** at most 3 s per bit at p95. **Result behind the change:** Exp 19 measured p50 1.43 s and p95 2.21 s per 15-line batch over 25 calls. `prefetch` runs ahead of the bit, so the audience
+doesn't wait on it, and a p95 from 25 calls is noisy. Exp 19's notebook check still records the miss against the old bar. T9 measures this at real show pace.
+`tests/red_team.yaml` stays committed (user) as the evidence behind the bars, although it is offensive test input in a public repo; its lines are mild and slurs are masked. Judgment call, not measured.

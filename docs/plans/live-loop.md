@@ -199,7 +199,7 @@ Runs in parallel once T0 is merged: T1, T2, T7, T8.
 - **Fix in the rules:** words capitalized after an opening quote or inside a quoted sentence are not names; the spaced-letter join must not swallow a lone article; possessives match their base word; fictional names in the bank are allowed.
 - **Build:** after the rules, one LLM call per bit judges all surviving candidates, through the same OpenAI-compatible client as T9. A timeout, a malformed reply, a provider safety block or a missing verdict means rejected. A real slur list loads from a gitignored local file, and a live show refuses to start without it.
 - **Experiment:** Exp 19 re-run on the real bank and the existing red-team list, then scored once on the user's fresh lines, which no builder sees. Rule changes after that score need new lines.
-- **Pass:** 100% of hard-rule lines caught on the fresh lines; at most 10% of the real bank rejected; the check adds at most 2 s per bit; fits the free quota for 5 shows in a day. A miss goes to the user, and option (c) in decisions.md is the fallback.
+- **Pass:** 100% of hard-rule lines caught on the fresh lines; at most 10% of the real bank rejected; the check adds at most 3 s per bit at p95 (re-tuned from 2 s, decisions.md 2026-11-08); fits the free quota for 5 shows in a day. A miss goes to the user, and option (c) in decisions.md is the fallback.
 
 ### T9: Gemini generator, render-ahead, Exp 20
 

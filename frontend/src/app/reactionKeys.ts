@@ -18,6 +18,10 @@ const TYPING_TAGS = new Set(["INPUT", "SELECT", "TEXTAREA"]);
 export type KeyInput = {
   code: string;
   repeat: boolean;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  altKey: boolean;
+  shiftKey: boolean;
   targetTag: string | null;
   targetEditable: boolean;
 };
@@ -33,6 +37,8 @@ export function reactionKeyFor(input: KeyInput, gate: ShowGate): ReactionKey | n
   const key = KEY_BY_CODE[input.code];
   if (!key) return null;
   if (input.repeat) return null;
+  // Browser shortcuts (Ctrl+K, Ctrl+D, Cmd+W...) must neither count as a laugh nor be swallowed.
+  if (input.ctrlKey || input.metaKey || input.altKey || input.shiftKey) return null;
   if (isTyping(input.targetTag, input.targetEditable)) return null;
   if (gate.room !== "live" || !gate.windowOpen) return null;
   return key;

@@ -40,6 +40,10 @@ export default function Home() {
         {
           code: event.code,
           repeat: event.repeat,
+          ctrlKey: event.ctrlKey,
+          metaKey: event.metaKey,
+          altKey: event.altKey,
+          shiftKey: event.shiftKey,
           targetTag: target?.tagName ?? null,
           targetEditable: target?.isContentEditable ?? false,
         },

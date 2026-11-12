@@ -238,6 +238,8 @@ data/external/
 
 # Live show logs: replay data, local only
 data/sessions/
+Diane/
+llm_judgments.jsonl
 
 # Permission emails: personal addresses, and this repo is public
 data/permissions/

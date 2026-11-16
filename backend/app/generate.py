@@ -54,8 +54,15 @@ BRIDGES = (
 
 # Seconds: (per-attempt timeout, deadline over all attempts), and the retries after the first attempt.
 GENERATOR_TIMING = (10.0, 12.0)
-FILTER_TIMING = (6.0, 8.0)
 RETRIES = 2
+# The filter's budget is sized by what a stall costs, not by how long a healthy call takes (1.3-2 s). A bit's
+# preparation starts when the previous bit's last joke ends (show.run_show awaits every joke before the next
+# iteration, because the next mode needs this bit's reward), so a longer wait is NOT hidden by playback: the bridge
+# lines are the only cover, MAX_BRIDGES of them at about 5 s each. Exp 22: a 6 s attempt / 8 s deadline timed out
+# 73 times in one show and sent 75% of its jokes to the bank. A fresh attempt at 12 s with 3 retries and a 25 s
+# deadline lets a second try land after a first stall; failing closed past that is unchanged.
+FILTER_TIMING = (12.0, 25.0)
+FILTER_RETRIES = 3
 
 
 class GenerationError(Exception):
@@ -139,5 +146,5 @@ def llm_stack(room: str):
     room without the slur list. The deadlines keep a failing provider inside the bridge lines' cover."""
     safety.require_ready(room)
     return (GeminiGenerator(llm.from_env(GENERATOR_TIMING[0], retries=RETRIES, deadline_s=GENERATOR_TIMING[1])),
-            LiveSafety(llm.from_env(FILTER_TIMING[0], retries=RETRIES, deadline_s=FILTER_TIMING[1])),
+            LiveSafety(llm.from_env(FILTER_TIMING[0], retries=FILTER_RETRIES, deadline_s=FILTER_TIMING[1])),
             BankGenerator(), list(BRIDGES))

@@ -48,15 +48,35 @@ class Client:
     attempts: int = 0
     retried: int = 0
     failed: int = 0
+    bad_replies: int = 0
 
-    def chat(self, system: str, user: str, *, json_reply: bool = False, temperature: float = 0.0) -> str:
+    def chat(self, system: str, user: str, *, json_reply: bool = False, temperature: float = 0.0,
+             validate: Callable[[str], None] | None = None) -> str:
+        """`validate` raises on a reply the caller cannot use. That reply is asked for once more, inside the same
+        retries and deadline and with no backoff (nothing is overloaded); a second bad reply is returned as it is,
+        so the caller decides what a bad reply means (the safety filter fails closed on it)."""
         start = time.monotonic()
+        bad = False
         for attempt in range(self.retries + 1):
             self.attempts += 1
             left = None if self.deadline_s is None else self.deadline_s - (time.monotonic() - start)
             try:
-                return self._once(system, user, json_reply, temperature,
+                text = self._once(system, user, json_reply, temperature,
                                   self.timeout if left is None else max(min(self.timeout, left), 0.1))
+                if validate is None:
+                    return text
+                try:
+                    validate(text)
+                    return text
+                except Exception:
+                    self.bad_replies += 1
+                    spent = time.monotonic() - start
+                    if bad or attempt == self.retries or (
+                            self.deadline_s is not None and spent + MIN_ATTEMPT_S > self.deadline_s):
+                        return text
+                    bad = True
+                    self.retried += 1
+                    continue
             except LLMError as e:
                 wait = self.backoff_s * 2 ** attempt
                 late = (self.deadline_s is not None

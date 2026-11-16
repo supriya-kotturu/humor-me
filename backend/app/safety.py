@@ -312,7 +312,11 @@ def prefetch(texts: list[str], age: str, client: llm.Client | None = None) -> No
                 raise llm.LLMError("no client")
             system = SYSTEM.format(teens=TEENS_RULE if age not in STANDARD_AGES else "")
             user = json.dumps([{"id": i, "text": t} for i, t in enumerate(batch)])
-            verdicts = _parse(client.chat(system, user, json_reply=True), len(batch))
+
+            def whole(reply: str) -> None:  # a partial or malformed reply is asked for once more before failing closed
+                if len(_parse(reply, len(batch))) < len(batch):
+                    raise ValueError("missing verdicts")
+            verdicts = _parse(client.chat(system, user, json_reply=True, validate=whole), len(batch))
             failure = None
         except Exception as exc:  # timeout, 429, malformed JSON, provider block: all mean rejected
             verdicts, failure = {}, f"llm:error:{type(exc).__name__}:{exc}"

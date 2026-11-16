@@ -258,7 +258,7 @@ async def _joke(bit, joke, plans, *, tts, player, source, clock, log, config, sp
     return level
 
 
-MAX_BRIDGES = 3  # a bit that is still loading after three bridge lines is a provider problem, not a pause
+MAX_BRIDGES = 5  # about 25 s of cover, sized to the filter's 25 s deadline; past it the provider is down, not slow
 
 
 async def _bridge(prep: asyncio.Task, rendered: list, player, used: list, *, bit, clock, log) -> None:

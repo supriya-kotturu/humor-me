@@ -457,7 +457,7 @@ def test_the_first_line_is_rendered_before_the_bridge_hands_over(tmp_path):
 
 
 def test_bridge_lines_are_not_repeated_while_unused_ones_remain(tmp_path):
-    lines = [f"b{i}" for i in range(8)]
+    lines = [f"b{i}" for i in range(12)]
     _, voice = show(tmp_path, Gen(delay=0.2), Filter(), bridges=lines, n_bits=3)
     bridges = [t for kind, t in voice.events if kind == "start" and t.startswith("b")]
     assert len(bridges) > 2 and len(set(bridges)) == len(bridges) and bridges == lines[:len(bridges)]
@@ -591,7 +591,7 @@ def test_stack_choice_and_the_live_room_guard(monkeypatch, tmp_path):
     monkeypatch.setenv("LLM_MODEL", "m")
     gen, filt, fallback, bridges = main.make_stack("sim")
     assert isinstance(gen, generate.GeminiGenerator) and isinstance(fallback, BankGenerator) and bridges
-    assert gen.client.retries == filt.client.retries == 2
+    assert gen.client.retries == generate.RETRIES and filt.client.retries == generate.FILTER_RETRIES
 
 
 # --- Exp 20's bookkeeping ---

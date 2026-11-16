@@ -28,7 +28,7 @@ class FakeClient:
     def __init__(self, *script):
         self.script, self.calls = list(script), []
 
-    def chat(self, system, user, *, json_reply=False):
+    def chat(self, system, user, *, json_reply=False, validate=None):
         self.calls.append(json.loads(user))
         step = self.script.pop(0) if len(self.script) > 1 else self.script[0]
         if isinstance(step, Exception):
@@ -206,7 +206,7 @@ def test_teens_get_a_stricter_prompt_and_their_own_cache_entry():
     seen = []
 
     class Spy(FakeClient):
-        def chat(self, system, user, *, json_reply=False):
+        def chat(self, system, user, *, json_reply=False, validate=None):
             seen.append(system)
             return super().chat(system, user, json_reply=json_reply)
 
@@ -389,3 +389,103 @@ def test_fresh_scoring_reports_per_category_overall_and_missed_lines(tmp_path):
 def test_stale_fixture_digest_is_refused():
     with pytest.raises(AssertionError):
         evaluate_safety.run(fixtures="not-the-digest")
+
+
+# --- the filter's time budget (Exp 22: a stalled provider sent whole bits to the bank) ---
+
+class Stalls:
+    """A provider on a fake clock. Each call takes the next scripted number of seconds, then answers the reply; a call
+    that would outlast the request's read timeout raises ReadTimeout at that timeout, as httpx would."""
+
+    def __init__(self, *script, reply=None):
+        self.now, self.script, self.reply, self.calls = 0.0, list(script), reply, 0
+
+    def __call__(self, request):
+        self.calls += 1
+        step = self.script.pop(0) if len(self.script) > 1 else self.script[0]
+        seconds, reply = step if isinstance(step, tuple) else (step, self.reply)
+        timeout = request.extensions["timeout"]["read"]
+        if seconds > timeout:
+            self.now += timeout
+            raise httpx.ReadTimeout("stall")
+        self.now += seconds
+        reply = reply(request) if callable(reply) else reply
+        return httpx.Response(200, json={"choices": [{"message": {"content": reply}, "finish_reason": "stop"}]})
+
+
+def filter_client(provider, monkeypatch):
+    from types import SimpleNamespace
+    from app import generate
+    monkeypatch.setattr(llm, "time", SimpleNamespace(monotonic=lambda: provider.now))
+    timeout, deadline = generate.FILTER_TIMING
+
+    def sleep(seconds):
+        provider.now += seconds
+    return llm.Client("https://example.test/v1", "k", "m", timeout, transport=httpx.MockTransport(provider),
+                      retries=generate.FILTER_RETRIES, deadline_s=deadline, sleep=sleep)
+
+
+LINES = ["First robot line.", "Second robot line."]
+
+
+def test_a_filter_call_that_stalls_past_the_old_timeout_still_passes_its_lines(monkeypatch):
+    provider = Stalls(10.0, reply=verdict_json([0, 1]))  # the old 6 s attempt would have timed out
+    safety.prefetch(LINES, "mixed", filter_client(provider, monkeypatch))
+    assert all(safety.check(t, "mixed").ok for t in LINES)
+    assert provider.calls == 1
+
+
+def test_a_timed_out_attempt_is_retried_inside_the_deadline(monkeypatch):
+    from app import generate
+    provider = Stalls(60.0, 3.0, reply=verdict_json([0, 1]))
+    client = filter_client(provider, monkeypatch)
+    safety.prefetch(LINES, "mixed", client)
+    assert all(safety.check(t, "mixed").ok for t in LINES)
+    assert provider.now <= generate.FILTER_TIMING[1]
+
+
+def test_one_malformed_reply_then_a_valid_one_passes(monkeypatch):
+    provider = Stalls((1.5, '{"verdicts": [{"id" 0, "ok": true}'), (1.5, verdict_json([0, 1])))
+    client = filter_client(provider, monkeypatch)
+    safety.prefetch(LINES, "mixed", client)
+    assert provider.calls == 2 and client.bad_replies == 1
+    assert all(safety.check(t, "mixed").ok for t in LINES)
+
+
+def test_a_partial_reply_is_asked_for_again(monkeypatch):
+    provider = Stalls((1.5, verdict_json([0])), (1.5, verdict_json([0, 1])))
+    safety.prefetch(LINES, "mixed", filter_client(provider, monkeypatch))
+    assert provider.calls == 2
+    assert all(safety.check(t, "mixed").ok for t in LINES)
+
+
+def test_two_malformed_replies_still_fail_closed_after_one_retry(monkeypatch):
+    provider = Stalls((1.5, "not json"))
+    safety.prefetch(LINES, "mixed", filter_client(provider, monkeypatch))
+    assert provider.calls == 2  # one fresh call, not the whole retry budget
+    verdicts = [safety.check(t, "mixed") for t in LINES]
+    assert not any(v.ok for v in verdicts) and all(v.reason.startswith("llm:error") for v in verdicts)
+
+
+def test_two_partial_replies_reject_only_the_missing_line(monkeypatch):
+    provider = Stalls((1.5, verdict_json([0])))
+    safety.prefetch(LINES, "mixed", filter_client(provider, monkeypatch))
+    assert provider.calls == 2
+    assert safety.check(LINES[0], "mixed").ok and not safety.check(LINES[1], "mixed").ok
+
+
+def test_a_dead_provider_fails_closed_within_the_deadline(monkeypatch):
+    from app import generate
+    provider = Stalls(1000.0)
+    client = filter_client(provider, monkeypatch)
+    safety.prefetch(LINES, "mixed", client)
+    assert not any(safety.check(t, "mixed").ok for t in LINES)
+    assert provider.now <= generate.FILTER_TIMING[1] and client.failed == 1
+
+
+def test_a_malformed_reply_cannot_extend_the_deadline(monkeypatch):
+    monkeypatch.setattr(llm, "MIN_ATTEMPT_S", 2.0)
+    provider = Stalls(60.0, (12.0, "not json"), (5.0, verdict_json([0, 1])))  # a stall, then a bad reply at 24.5 s
+    safety.prefetch(LINES, "mixed", filter_client(provider, monkeypatch))
+    assert provider.calls == 2 and provider.now <= 25.0  # no time for a third call, so it fails closed
+    assert not any(safety.check(t, "mixed").ok for t in LINES)

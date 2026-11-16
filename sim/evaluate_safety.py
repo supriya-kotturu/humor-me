@@ -80,11 +80,11 @@ class EvalClient:
         self.retries = 0
         self.failures = 0
 
-    def chat(self, system: str, user: str, *, json_reply: bool = False) -> str:
+    def chat(self, system: str, user: str, *, json_reply: bool = False, validate=None) -> str:
         for attempt in range(self.tries):
             started = time.perf_counter()
             try:
-                reply = self.client.chat(system, user, json_reply=json_reply)
+                reply = self.client.chat(system, user, json_reply=json_reply, validate=validate)
             except llm.LLMError as e:
                 if e.status in RETRY_STATUS and attempt < self.tries - 1:
                     self.retries += 1

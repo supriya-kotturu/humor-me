@@ -14,6 +14,8 @@ Next.js UI for the live show: a single operator screen.
 
 Rules live in `src/app/reactionKeys.ts` (pure, one function). Keys use `event.code` (`KeyW`, `KeyK`, `Space`, `KeyD`), ignore repeats and typing in inputs, and only act in a Live show while a window is open. Space is `preventDefault`-ed so the page doesn't scroll.
 
+**Pause:** the Pause button or `P` pauses the show; press again to resume.
+
 - **Live:** a press sends `{type: "reaction", bit, joke, key}`; the button stays lit until the window closes and a later press moves the highlight.
 - **Simulated:** buttons send nothing; the one matching `sim_reaction` lights briefly.
 - **No double fire:** buttons take `tabIndex={-1}` and ignore mouse-down focus, the handler blurs whatever has focus, and a keyboard-generated click (`detail === 0`) is ignored.

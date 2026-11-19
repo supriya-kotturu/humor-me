@@ -33,6 +33,7 @@ export function useShow() {
   const [notice, setNotice] = useState("");
   const [endStatus, setEndStatus] = useState<EndStatus | null>(null);
   const [rating, setRating] = useState<RatingState | null>(null);
+  const [paused, setPaused] = useState(false);
   const socketRef = useRef<WebSocket | null>(null);
   const contextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -90,6 +91,7 @@ export function useShow() {
       setEndStatus(null);
       setRating(null);
       setFlash(null);
+      setPaused(false);
       closeWindow();
       roomRef.current = setup.room;
       setRoom(setup.room);
@@ -190,6 +192,8 @@ export function useShow() {
             socket.close();
           } else if (msg.type === "show_end") {
             finished = true;
+            setPaused(false);
+            void context.resume();
             stopMic();
             closeWindow();
             setEndStatus(msg.status === "aborted" ? "aborted" : "finished");
@@ -221,6 +225,18 @@ export function useShow() {
     [closeWindow, stopMic],
   );
 
+  // Pausing freezes playback: the line in progress stops mid-word, and the server waits for its `played` without a
+  // time limit, so nothing new starts. A reaction window already open still closes on the server's clock. The room
+  // recording keeps running, since it has its own capture path.
+  const togglePause = useCallback(() => {
+    const context = contextRef.current;
+    if (!context) return;
+    setPaused((was) => {
+      void (was ? context.resume() : context.suspend());
+      return !was;
+    });
+  }, []);
+
   // Only a Live show with an open window sends; a simulated room answers for itself.
   const react = useCallback((key: ReactionKey) => {
     const open = windowRef.current;
@@ -242,5 +258,8 @@ export function useShow() {
     socket.send(JSON.stringify({ type: "rating", value }));
   }, []);
 
-  return { state, line, analyser, start, room, reactionWindow, pressed, flash, notice, endStatus, rating, rate, react };
+  return {
+    state, line, analyser, start, room, reactionWindow, pressed, flash, notice, endStatus, rating, rate, react,
+    paused, togglePause,
+  };
 }

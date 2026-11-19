@@ -221,3 +221,9 @@
   align-items: center;
   font-size: 1rem;
 }
+
+.controls {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}

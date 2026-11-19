@@ -71,3 +71,10 @@ export function ratingFor(input: KeyInput): number | null {
   if (isTyping(input.targetTag, input.targetEditable)) return null;
   return value;
 }
+
+// P pauses or resumes the show. Same guards as reactions.
+export function isPauseKey(input: KeyInput): boolean {
+  if (input.code !== "KeyP" || input.repeat) return false;
+  if (input.ctrlKey || input.metaKey || input.altKey || input.shiftKey) return false;
+  return !isTyping(input.targetTag, input.targetEditable);
+}

@@ -10,16 +10,17 @@ cd backend
 uv python install 3.12  # or any Python 3.12
 uv venv --seed --python 3.12 .venv
 .venv/Scripts/python -m pip install -r requirements.txt
-cp .env.example .env
+cp sample.env .env
 ```
 
-`.env` points at any OpenAI-compatible chat endpoint (see `.env.example`):
+`.env` points at any OpenAI-compatible chat endpoint (see `sample.env`):
 
 | Variable | Example |
 |---|---|
-| `LLM_BASE_URL` | `https://api.groq.com/openai/v1`, `http://localhost:11434/v1` (Ollama) |
-| `LLM_API_KEY` | provider key (empty for Ollama) |
-| `LLM_MODEL` | e.g. `llama-3.1-8b-instant` |
+| `GEMINI_BASE_URL` | `https://api.groq.com/openai/v1`, `http://localhost:11434/v1` (Ollama) |
+| `GEMINI_API_KEY` | provider key (empty for Ollama) |
+| `JOKE_WRITER_MODEL` | e.g. `llama-3.1-8b-instant` |
+| `JOKE_WRITER_PROVIDER` | `openai` (default, the three above) or `anthropic` (official SDK, key in `ANTHROPIC_API_KEY`, `JOKE_WRITER_MODEL=claude-haiku-5-5`) |
 
 ## Run
 
@@ -55,14 +56,14 @@ cd backend
 
 The mode the director picked is never sent. Presses outside their window are not logged as reactions (replay counts every
 row), only noted by the Python logger. Within a hold the last press wins and each change is a `reaction` row.
-By default the show uses the bank and a bank-only filter (`BankOnlySafety`), which needs no key. `GENERATOR=llm` switches to the
+By default the show uses the bank and a bank-only filter (`BankOnlySafety`), which needs no key. `JOKE_SOURCE=llm` switches to the
 real stack (`app/generate.py`): one model call per bit for 5 jokes x 3 candidates, the safety filter's rules plus one LLM verdict call
 per bit, the next line rendered while the current one plays, and in-character bridge lines while a bit loads. A failed call is retried
 twice inside a deadline; a failed generation or a bit whose candidates are all rejected falls back to the hand-checked bank (rules only, no API call), logged in
 `candidates`. A `live` room refuses to start without `app/blocklist.local.txt`.
 
 ```sh
-.venv/Scripts/python -m uvicorn app.main:app --port 8000 --env-file .env   # with GENERATOR=llm in .env
+.venv/Scripts/python -m uvicorn app.main:app --port 8000 --env-file .env   # with JOKE_SOURCE=llm in .env
 ```
 
 ## Acceptance run (T11, the Stage 0 exit)
@@ -81,11 +82,11 @@ The user runs the shows; `sim/acceptance.py` scores them. Needed: 3 simulated sh
 
 ```sh
 cd backend
-.venv/Scripts/python -m uvicorn app.main:app --port 8000 --env-file .env   # with GENERATOR=llm in .env
+.venv/Scripts/python -m uvicorn app.main:app --port 8000 --env-file .env   # with JOKE_SOURCE=llm in .env
 cd ../frontend && npm run dev   # then open http://localhost:3000
 ```
 
-Set `GENERATOR=llm` in `backend/.env` (a one-command prefix differs between Bash and PowerShell, and `--env-file` reads it either way). Simulated shows can run on `GENERATOR=bank` (no quota) or `llm`; the live show uses `llm` (decisions-detail.md 2026-11-15).
+Set `JOKE_SOURCE=llm` in `backend/.env` (a one-command prefix differs between Bash and PowerShell, and `--env-file` reads it either way). Simulated shows can run on `JOKE_SOURCE=bank` (no quota) or `llm`; the live show uses `llm` (decisions-detail.md 2026-11-15).
 
 **Run:** (1) three Simulated shows back to back, untouched; (2) one Live show, you press W / K / Space / D for every joke, consent ticked; (3) after each show answer the rating prompt (keys 1 to 5, or Skip; a show that failed before it began shows its error and no prompt). Then score them. The session ids are the file names in `data/sessions/` without `.jsonl`:
 
@@ -99,6 +100,18 @@ python -m sim.acceptance <sim id 1> <sim id 2> <sim id 3> <live id> --record
 Pass only the shows meant to count: an unreadable log among the ids fails check (a).
 
 It prints a table per show (valid rows, status, bank share, bridges, label counts, rating, audio coverage) and the four verdicts: (a) 3 simulated in a row, (b) a valid finished live show, (c) label spread (one key over 60% of presses is flagged, reported only), (d) per-bit reward noise against the sim's 0.15, with "RERUN Exp 18" when it is more than half away. With one live show the noise rests on 8 bits and the interval is wide; the output says when the call is a guess. `--record` saves numbers and the session ids only, in `reports/metrics/acceptance.json` (no text, no audio, no paths); then run `python scripts/run_notebook.py` to refresh the Exp 22 section, which lists the recorded ids. Logs and recordings in `data/sessions/` are gitignored: never commit them.
+
+## Comparing generator models (Exp 24)
+
+Compares Gemini Flash-Lite (today's), Gemini Flash and Claude Haiku 5.5 on 30 bits. The bar is fixed in [the plan](../docs/plans/live-loop.md) (T13). Run from the repo root, in the root venv, in the main checkout (the keys are there).
+
+1. **Keys in `backend/.env`:** `GEMINI_API_KEY` (Gemini, as today) and `ANTHROPIC_API_KEY` (a paid key; Claude is not free). If `app/blocklist.local.txt` exists it is used by the filter's rules, as in a live show.
+2. **Generate (about 25 minutes, paced for the free tier, resumable):** `.venv/Scripts/python -m sim.compare_generators run --env-file backend/.env`. Stop and rerun any time; finished calls are not repeated. A bad key stops the run without saving a failure. `--redo-failed` repeats failed calls, `--models gemini-flash-lite,claude-haiku-5-5` picks models, `--n 36` adds prompts.
+3. **Ballot:** `python -m sim.compare_generators export` writes `ballot.md`, `key.json` and `votes.csv` under `data/model_comparison/gen-<digest>/`. It lists any prompt dropped because a model had no safe thread.
+4. **Vote (about 40 minutes):** `python -m sim.compare_generators vote` shows each prompt and asks for the order, best first (`BAC`). It saves after every answer, `s` skips, `q` quits; run it again to continue. Don't open `key.json`. Or fill `votes.csv` by hand from `ballot.md`.
+5. **Score:** `python -m sim.compare_generators score` prints the table and the pick, and saves numbers only to `reports/metrics/model_comparison.json`. Then `python scripts/run_notebook.py` to refresh the Exp 24 section and commit the metrics file.
+
+Everything under `data/model_comparison/` (joke text, ballot, key, votes) is gitignored: never commit it. `JOKE_WRITER_PROVIDER=anthropic` with `JOKE_WRITER_MODEL=claude-haiku-5-5` also runs a show on Claude (`app/llm_anthropic.py`); the safety filter then uses Claude too, so keep the default for now.
 
 ## Pick a provider first
 

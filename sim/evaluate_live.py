@@ -152,7 +152,7 @@ def run(ages: tuple = ("mixed", "teens", "mixed"), n_bits: int = 8, seed: int = 
     requests = [s["generator"]["attempts"] + s["filter"]["attempts"] for s in shows]
     retried = sum(s["generator"]["retried"] + s["filter"]["retried"] for s in shows)
     failed = sum(s["generator"]["failed"] + s["filter"]["failed"] for s in shows)
-    model = llm.from_env().model
+    model = llm.from_env(role="joke_writer").model
     per_day = 5 * float(np.mean(requests))
     peak = peak_per_minute([t for s in shows for t in s["request_starts"]])
     return {"model": model, "shows": shows, "n_within": len(within), "n_between": len(between),

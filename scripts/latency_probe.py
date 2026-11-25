@@ -44,7 +44,10 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--runs", type=int, default=5)
     args = ap.parse_args()
-    base, key, model = os.environ["LLM_BASE_URL"], os.getenv("LLM_API_KEY", ""), os.environ["LLM_MODEL"]
+    # role names first (backend/sample.env), then the pre-rename ones
+    base = os.getenv("GEMINI_BASE_URL") or os.environ["LLM_BASE_URL"]
+    key = os.getenv("GEMINI_API_KEY") or os.getenv("LLM_API_KEY", "")
+    model = os.getenv("JOKE_WRITER_MODEL") or os.environ["LLM_MODEL"]
 
     ttfts, totals = [], []
     with httpx.Client(timeout=60) as client:

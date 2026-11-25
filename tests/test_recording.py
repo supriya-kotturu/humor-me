@@ -246,8 +246,9 @@ def test_sessions_are_gitignored(name):
 
 def test_llm_without_its_settings_says_what_to_set(monkeypatch):
     monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("GEMINI_BASE_URL", raising=False)
     monkeypatch.setenv("LLM_MODEL", "m")
-    with pytest.raises(RuntimeError, match=r"LLM_BASE_URL.*--env-file"):
+    with pytest.raises(RuntimeError, match=r"GEMINI_BASE_URL.*--env-file"):
         llm.from_env()
 
 

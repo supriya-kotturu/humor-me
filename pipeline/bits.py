@@ -91,9 +91,12 @@ PROMPT_SHA = hashlib.sha256(SYSTEM.encode("utf-8")).hexdigest()[:12]
 def load_env() -> tuple[str, str, str]:
     load_dotenv(ROOT / "backend" / ".env")
     try:
-        return os.environ["LLM_BASE_URL"].rstrip("/"), os.environ["LLM_API_KEY"], os.environ["PIPELINE_MODEL"]
+        # role names first (backend/sample.env), then the pre-rename ones
+        get = lambda new, old: os.environ.get(new) or os.environ[old]  # noqa: E731
+        return (get("GEMINI_BASE_URL", "LLM_BASE_URL").rstrip("/"), get("GEMINI_API_KEY", "LLM_API_KEY"),
+                get("TRANSCRIPT_PIPELINE_MODEL", "PIPELINE_MODEL"))
     except KeyError as e:
-        sys.exit(f"backend/.env is missing {e}; see backend/.env.example")
+        sys.exit(f"backend/.env is missing {e}; see backend/sample.env")
 
 
 def load_set_lines(set_id: str) -> tuple[str, list[dict]]:

@@ -1,7 +1,6 @@
 import asyncio
 import contextlib
 import logging
-import os
 import secrets
 import types
 
@@ -10,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.bank import BankGenerator
 from app.director import load_director
+from app import llm
 from app.generate import llm_stack
 from app.live import AnnouncedSim, BankOnlySafety, ButtonSource, WebSocketPlayer, git_sha, load_sessions
 from app.log import SESSIONS, SessionLog, read_session
@@ -45,7 +45,7 @@ def get_tts():
 def make_stack(room: str):
     """(generator, safety, fallback, bridge lines). `GENERATOR=llm` brings the real model and filter; otherwise the
     bank alone, which needs no key or quota (and is what the tests run)."""
-    if os.environ.get("GENERATOR", "bank") == "llm":
+    if llm.setting("JOKE_SOURCE", "bank") == "llm":
         return llm_stack(room)
     return BankGenerator(), BankOnlySafety(), None, None
 

@@ -80,7 +80,7 @@ py -3.14 -m venv .venv
 cd backend
 py -3.14 -m venv .venv
 .venv/Scripts/python -m pip install -r requirements.txt
-cp .env.example .env          # then fill in LLM_BASE_URL / LLM_API_KEY / LLM_MODEL
+cp sample.env .env          # then fill in GEMINI_BASE_URL / GEMINI_API_KEY / JOKE_WRITER_MODEL
 cd ..
 
 # 3. Frontend
@@ -100,7 +100,7 @@ Run from the repo root with the tooling env. Each stage reads the previous stage
 | 2 | `.venv/Scripts/python -m pipeline.ingest` | PDFs + overrides | `data/interim/*.body.txt`, `*.meta.json` | Stops if a set has no override entry. |
 | 3 | `.venv/Scripts/python -m pipeline.markers` | `*.body.txt` + `data/markers.yaml` | `*.clean.txt`, `*.events.jsonl`, updates `*.meta.json` | Stops on unmapped reaction strings → run with `--draft`, review, add to lexicon. |
 | 4 | `.venv/Scripts/python -m pipeline.beats` | clean text + events + `datasets.json` | `data/processed/<dataset>/beats.jsonl`, `*.labeled.txt` | S3. Check `labeled.txt` by eye. |
-| 5 | `.venv/Scripts/python -m pipeline.bits <set_id>` (or `--all`) | `lines.jsonl` + `backend/.env` | `data/processed/<dataset>/bits.jsonl` | S4+S5 in one Gemini call per set; output validated, cached. Needs `PIPELINE_MODEL` + key. |
+| 5 | `.venv/Scripts/python -m pipeline.bits <set_id>` (or `--all`) | `lines.jsonl` + `backend/.env` | `data/processed/<dataset>/bits.jsonl` | S4+S5 in one Gemini call per set; output validated, cached. Needs `TRANSCRIPT_PIPELINE_MODEL` + key. |
 | 6 | `.venv/Scripts/python -m pipeline.validate` | `bits.jsonl` + hand labels | `data/processed/eval_bits.json` | S6: needs `data/labels/<set>.yaml` from `pipeline.labels` |
 
 Tests (synthetic data only, never reads the corpus): `.venv/Scripts/python -m pytest tests -q`

@@ -162,7 +162,7 @@ def criteria(res: dict, bar_catch=BAR_CATCH, bar_false_reject=BAR_FALSE_REJECT, 
 
 def run(fixtures: str = "", prompt: str = "") -> dict:
     assert fixtures in ("", digest()) and prompt in ("", prompt_digest()), "fixtures or prompt changed since this call was built"
-    raw = llm.from_env(timeout=30.0)
+    raw = llm.from_env(timeout=30.0, role="safety_check")
     client = EvalClient(raw)
     res = evaluate(client, load(RED_TEAM), load(CLEAN), load_bank())
     res.update(model=raw.model, n_red_team=len(load(RED_TEAM)), n_clean=len(load(CLEAN)), n_bank=len(load_bank()))
@@ -219,9 +219,9 @@ def main() -> None:
         from dotenv import load_dotenv
         load_dotenv(a.env_file, override=True)
     if a.fresh:
-        print_fresh(score_fresh(load(pathlib.Path(a.fresh)), EvalClient(llm.from_env(timeout=30.0))))
+        print_fresh(score_fresh(load(pathlib.Path(a.fresh)), EvalClient(llm.from_env(timeout=30.0, role="safety_check"))))
     elif a.tune_only:
-        res = evaluate(EvalClient(llm.from_env(timeout=30.0)), load(RED_TEAM), [], [], splits=("tune",))
+        res = evaluate(EvalClient(llm.from_env(timeout=30.0, role="safety_check")), load(RED_TEAM), [], [], splits=("tune",))
         for layer in ("rules", "llm"):
             print(layer, {c: cell(v["tune"]) for c, v in res[layer]["per_category"].items()},
                   "hard", cell(res[layer]["hard_overall"]["tune"]))

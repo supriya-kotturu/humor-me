@@ -138,6 +138,6 @@ def llm_stack(room: str):
     """(generator, safety, fallback, bridge lines) for a show on the real model. Raises SafetyNotReady for a live
     room without the slur list. The deadlines keep a failing provider inside the bridge lines' cover."""
     safety.require_ready(room)
-    return (GeminiGenerator(llm.from_env(GENERATOR_TIMING[0], retries=RETRIES, deadline_s=GENERATOR_TIMING[1])),
-            LiveSafety(llm.from_env(FILTER_TIMING[0], retries=RETRIES, deadline_s=FILTER_TIMING[1])),
+    return (GeminiGenerator(llm.from_env(GENERATOR_TIMING[0], role="joke_writer", retries=RETRIES, deadline_s=GENERATOR_TIMING[1])),
+            LiveSafety(llm.from_env(FILTER_TIMING[0], role="safety_check", retries=RETRIES, deadline_s=FILTER_TIMING[1])),
             BankGenerator(), list(BRIDGES))

@@ -36,6 +36,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "backend"))
 from app.director import joke_levels  # noqa: E402
 from app.log import KEY_LEVELS, SESSIONS, read_session  # noqa: E402
+from app.pauses import intervals, paused_jokes  # noqa: E402
 from app.reward import reward_v1  # noqa: E402
 from sim import cache  # noqa: E402
 from sim.env import MAX_LEVEL  # noqa: E402
@@ -50,8 +51,9 @@ KEY_OF = {level: key for key, level in KEY_LEVELS.items()}
 
 
 def label_spread(levels: list[int | None]) -> dict:
-    """Count and share per key of each joke's final label (the last press, which is what the reward uses), `none` for
-    a window nobody answered. `presses` excludes `none`, and the flag looks at presses only."""
+    """Count and share per key of each joke's final press (the last one), `none` for a window nobody answered. Fed
+    from the raw reaction rows, so a joke dropped from the reward for a pause still counts as the press the operator
+    made: this check is about the operator's key bias, not the reward. `presses` excludes `none`, and the flag looks at presses only."""
     counts = {key: 0 for key in (*KEY_LEVELS, "none")}
     for level in levels:
         counts["none" if level is None else KEY_OF[level]] += 1
@@ -63,9 +65,10 @@ def label_spread(levels: list[int | None]) -> dict:
             "flagged": presses > 0 and counts[top] / presses > SPREAD_LIMIT}
 
 
-def bit_levels(rows: list[dict]) -> list[list[int | None]]:
-    """Per finished bit (one with a `bit_end` row), the final level of each joke."""
-    return [joke_levels(rows, r["bit"]) for r in rows if r["event"] == "bit_end"]
+def bit_levels(rows: list[dict], keep_paused: bool = False) -> list[list[int | None]]:
+    """Per finished bit (one with a `bit_end` row), the final level of each joke; a joke whose playback a pause
+    interrupted is None unless `keep_paused` (D-92)."""
+    return [joke_levels(rows, r["bit"], keep_paused) for r in rows if r["event"] == "bit_end"]
 
 
 def noise_stats(bits: list[list[int | None]]) -> dict:
@@ -143,12 +146,27 @@ def bank_jokes(rows: list[dict]) -> int:
     return n
 
 
+def pause_report(rows: list[dict]) -> dict:
+    """Pauses in one show (D-92): how many, how many seconds, and how many jokes lost their label to one. An unmatched
+    pause (the show ended paused) counts to the last row's time. Seconds are on the show clock, and the log's `at` is
+    the same timebase for a real show."""
+    cut = next((i for i, r in enumerate(rows) if r["event"] == "show_end"), len(rows))
+    rows = rows[:cut + 1]  # a row after show_end is not part of the show
+    end = rows[-1]["at"]
+    spans = intervals(rows)
+    bits = {r["bit"] for r in rows if r["event"] == "joke_played"}
+    return {"count": len(spans), "paused_s": sum(max(0.0, min(q, end) - p) for p, q in spans),
+            "jokes_dropped": sum(len(paused_jokes(rows, b)) for b in bits)}
+
+
 def audio_coverage(rows: list[dict], directory: pathlib.Path) -> dict | None:
     audio = rows[0]["audio"]
     if audio.get("path") is None:
         return None
     end = next((r["at"] for r in rows if r["event"] == "show_end"), rows[-1]["at"])
     span, seconds = end - audio["start_at"], wav_seconds(directory / audio["path"])
+    # The browser keeps recording while paused (its capture path is not the playback context), so the file spans the
+    # pauses too and the expected span is not reduced by them.
     return {"wav_s": seconds, "log_span_s": span, "coverage": None if seconds is None or span <= 0 else seconds / span}
 
 
@@ -164,16 +182,19 @@ def show_report(session: str, directory: pathlib.Path) -> dict:
     start, ends = rows[0], [r for r in rows if r["event"] == "show_end"]
     played = [r for r in rows if r["event"] == "joke_played"]
     bits = bit_levels(rows)
-    levels = [lv for bit in bits for lv in bit]
+    levels = [lv for bit in bit_levels(rows, keep_paused=True) for lv in bit]
     banked = bank_jokes(rows)
     stats = noise_stats(bits)
     ratings = [r["value"] for r in rows if r["event"] == "rating"]
+    pauses = pause_report(rows)
+    status = ends[-1]["status"] if ends else "none"
     return {"session": session, "valid": True, "error": None, "at": start["at"], "room": start["room"],
-            "status": ends[-1]["status"] if ends else "none", "generator_id": start["generator_id"],
+            "status": status, "generator_id": start["generator_id"],
             "n_jokes": len(played), "n_bits": sum(r["event"] == "bit_end" for r in rows),
             "bank_jokes": banked, "bank_share": banked / len(played) if played else None,
             "n_bridges": sum(r["event"] == "bridge" for r in rows), "labels": label_spread(levels),
-            "rating": ratings[-1] if ratings else None, "audio": audio_coverage(rows, directory),
+            "rating": ratings[-1] if ratings else None, "pauses": pauses,
+            "rating_counts": status == "finished" and pauses["count"] == 0, "audio": audio_coverage(rows, directory),
             "noise_stats": stats, "noise": finish_noise(stats)}
 
 
@@ -189,6 +210,17 @@ def sims_in_a_row(shows: list[dict]) -> bool:
         return False
     sims = [s for s in sorted((s for s in shows if s["valid"]), key=lambda s: s["at"]) if s["room"] == "sim"]
     return any(all(clean(s) for s in sims[i:i + SIMS_IN_A_ROW]) for i in range(len(sims) - SIMS_IN_A_ROW + 1))
+
+
+def rating_summary(shows: list[dict]) -> dict:
+    """The reported outcome (invariant 5): ratings of finished shows with no pause. A paused or aborted show's rating
+    stays listed in `excluded` with the reason, because half a show is not comparable to a whole one (D-90)."""
+    rated = [s for s in shows if s["valid"] and s["rating"] is not None]
+    values = [s["rating"] for s in rated if s["rating_counts"]]
+    return {"n": len(values), "mean": sum(values) / len(values) if values else None, "values": values,
+            "excluded": [{"session": s["session"], "rating": s["rating"],
+                          "reason": "aborted" if s["status"] != "finished" else "paused"}
+                         for s in rated if not s["rating_counts"]]}
 
 
 def pooled_noise(shows: list[dict]) -> dict:
@@ -208,7 +240,7 @@ def run(sessions: list[str], key: str = "", directory: str | pathlib.Path = SESS
             "pass_a_sims_in_a_row": sims_in_a_row(shows),
             "pass_b_live_show": any(clean(s) for s in live),
             "flag_c_label_spread": [s["session"] for s in live if s["labels"]["flagged"]],
-            "noise": pooled_noise(shows)}
+            "ratings": rating_summary(shows), "noise": pooled_noise(shows)}
 
 
 def digest(sessions: list[str], directory: str | pathlib.Path = SESSIONS) -> str:
@@ -246,17 +278,20 @@ def pct(x: float | None) -> str:
 
 
 def table(res: dict) -> str:
-    lines = ["| Show | Room | Valid | Status | Generator | Jokes | Bank | Bridges | W / K / Space / D / none | Rating | Audio |",
-             "|---|---|---|---|---|---|---|---|---|---|---|"]
+    lines = ["| Show | Room | Valid | Status | Generator | Jokes | Bank | Bridges | W / K / Space / D / none | Pauses (s, jokes dropped) | Rating | Audio |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for s in res["shows"]:
         if not s["valid"]:
-            lines.append(f"| {s['session']} | - | NO: {s['error']} | - | - | - | - | - | - | - | - |")
+            lines.append(f"| {s['session']} | - | NO: {s['error']} | - | - | - | - | - | - | - | - | - |")
             continue
         c = s["labels"]["counts"]
         cov = (s["audio"] or {}).get("coverage")
+        p = s.get("pauses", {"count": 0})  # a record saved before D-92 has no pause fields
+        paused = "-" if not p["count"] else f"{p['count']} ({p['paused_s']:.0f} s, {p['jokes_dropped']})"
+        rating = "-" if s["rating"] is None else f"{s['rating']}" + ("" if s.get("rating_counts", True) else " (not counted)")
         lines.append(f"| {s['session']} | {s['room']} | yes | {s['status']} | {s['generator_id']} | {s['n_jokes']} | "
                      f"{pct(s['bank_share'])} | {s['n_bridges']} | "
-                     f"{c['W']} / {c['K']} / {c['Space']} / {c['D']} / {c['none']} | {s['rating'] or '-'} | "
+                     f"{c['W']} / {c['K']} / {c['Space']} / {c['D']} / {c['none']} | {paused} | {rating} | "
                      f"{'not recorded' if s['audio'] is None else pct(cov)} |")
     return "\n".join(lines)
 
@@ -267,6 +302,9 @@ def verdict(res: dict) -> str:
            f"(b) a live show, valid and finished: {'PASS' if res['pass_b_live_show'] else 'NOT MET'}",
            "(c) label spread, one key over 60% of presses (reported, never blocks): "
            + (", ".join(res["flag_c_label_spread"]) + " FLAGGED" if res["flag_c_label_spread"] else "none flagged")]
+    if r := res.get("ratings"):
+        out.append("reported rating: " + (f"mean {r['mean']:.2f} of {r['n']} show(s)" if r["n"] else "no counted rating yet")
+                   + "".join(f"; {x['session']} not counted ({x['reason']})" for x in r["excluded"]))
     if n.get("bit_sd") is None:
         out.append("(d) per-bit reward noise: no live bit with 3 or more labels yet")
     else:

@@ -33,6 +33,13 @@ export function useShow() {
   const [notice, setNotice] = useState("");
   const [endStatus, setEndStatus] = useState<EndStatus | null>(null);
   const [rating, setRating] = useState<RatingState | null>(null);
+  const [paused, setPaused] = useState(false);
+  // What the browser last asked for and the server has not answered yet, so a refusal can be undone.
+  const pendingPauseRef = useRef<"pause" | "resume" | null>(null);
+  const pausedRef = useRef(false);
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
   const socketRef = useRef<WebSocket | null>(null);
   const contextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
@@ -90,6 +97,8 @@ export function useShow() {
       setEndStatus(null);
       setRating(null);
       setFlash(null);
+      setPaused(false);
+      pendingPauseRef.current = null;
       closeWindow();
       roomRef.current = setup.room;
       setRoom(setup.room);
@@ -124,6 +133,9 @@ export function useShow() {
       };
       socket.onclose = () => {
         stopMic();
+        pendingPauseRef.current = null;
+        setPaused(false); // nobody is left to resume the show, and the context must not stay suspended
+        void context.resume();
         closeWindow();
         if (finished) {
           setRating((r) => (r === "ask" || r === "saving" ? "skipped" : r)); // nobody left to take the rating
@@ -185,11 +197,26 @@ export function useShow() {
           } else if (msg.type === "error") {
             setNotice(String(msg.message));
             setRating((r) => (r === "saving" ? "ask" : r)); // a refused rating can be tried again
+            // Only the server's refusal of our own pause or resume (`about: "pause"`) undoes it; any other error
+            // arriving meanwhile must not flip the state.
+            const refused = msg.about === "pause" ? pendingPauseRef.current : null;
+            if (msg.about === "pause") pendingPauseRef.current = null;
+            if (refused) {
+              setPaused(refused === "resume");
+              void (refused === "resume" ? context.suspend() : context.resume());
+            }
+          } else if (msg.type === "pause_state") {
+            pendingPauseRef.current = null;
+            setPaused(msg.paused === true);
+            void (msg.paused === true ? context.suspend() : context.resume());
           } else if (msg.type === "rating_saved") {
             setRating("saved");
             socket.close();
           } else if (msg.type === "show_end") {
             finished = true;
+            pendingPauseRef.current = null;
+            setPaused(false);
+            void context.resume();
             stopMic();
             closeWindow();
             setEndStatus(msg.status === "aborted" ? "aborted" : "finished");
@@ -221,6 +248,22 @@ export function useShow() {
     [closeWindow, stopMic],
   );
 
+  // Pausing freezes playback: the line in progress stops mid-word, and the server waits for its `played` without a
+  // time limit, so nothing new starts. A reaction window already open still closes on the server's clock. The room
+  // recording keeps running, since it has its own capture path. The server logs the pause on the show clock and drops
+  // the label of any joke that was playing (D-92); it answers `pause_state`, or `error` when the show can't pause.
+  const togglePause = useCallback(() => {
+    const context = contextRef.current;
+    const socket = socketRef.current;
+    if (!context || socket?.readyState !== WebSocket.OPEN || pendingPauseRef.current) return;
+    const kind = pausedRef.current ? "resume" : "pause";
+    pendingPauseRef.current = kind;
+    pausedRef.current = kind === "pause";
+    setPaused(pausedRef.current);
+    void (kind === "pause" ? context.suspend() : context.resume());
+    socket.send(JSON.stringify({ type: kind }));
+  }, []);
+
   // Only a Live show with an open window sends; a simulated room answers for itself.
   const react = useCallback((key: ReactionKey) => {
     const open = windowRef.current;
@@ -242,5 +285,8 @@ export function useShow() {
     socket.send(JSON.stringify({ type: "rating", value }));
   }, []);
 
-  return { state, line, analyser, start, room, reactionWindow, pressed, flash, notice, endStatus, rating, rate, react };
+  return {
+    state, line, analyser, start, room, reactionWindow, pressed, flash, notice, endStatus, rating, rate, react,
+    paused, togglePause,
+  };
 }

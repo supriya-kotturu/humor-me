@@ -1,5 +1,6 @@
 """The acceptance scorer (Exp 22) on synthetic logs: it must call a clean show clean, an aborted one not, and recover a
 known noise level, so a verdict on the user's real shows means something."""
+import json
 import pathlib
 import sys
 import wave
@@ -28,13 +29,17 @@ def real_clock():
 
 
 def write_show(directory, levels_per_bit, room="live", status="finished", rating=None, at=1000.0, bank_bits=(),
-               bridges=0, audio=None, generator="llm"):
+               bridges=0, audio=None, generator="llm", pauses=()):
     """A consistent show; `at` is the first row's time. `levels_per_bit`: one list of levels per bit. Returns its id."""
     clock = iter(range(int(at), int(at) + 100_000))
     log_module.time.time = lambda: next(clock)
     log = SessionLog(directory)
     log.write("show_start", room=room, context=CTX, policy=POLICY, generator_id=generator, selector_id="uniform",
               git_sha="x", operator="t", audio=audio or {"consent": False, "path": None})
+    for paused_at, resumed_at in pauses:  # (start, end) on the show clock; end None = the show ended paused
+        log.write("pause", paused_at=paused_at)
+        if resumed_at is not None:
+            log.write("resume", resumed_at=resumed_at)
     for bit, levels in enumerate(levels_per_bit):
         log.write("bit_decision", bit=bit, obs={"t": bit, "n_bits": 8, "context": CTX, "last_mode": None},
                   scores={m: 0.0 for m in MODES}, greedy=MODES[0], action=MODES[0], probs={m: 1 / 6 for m in MODES})
@@ -45,7 +50,7 @@ def write_show(directory, levels_per_bit, room="live", status="finished", rating
             log.write("candidates", bit=bit, joke=joke, prompt_id="p", prompt="p", generator_id=generator,
                       items=[{"text": "t", "verdict": "pass", "reason": reason}])
             log.write("joke_played", bit=bit, joke=joke, chosen=0, pick_prob=1.0, text="t", tts_seconds=0.1,
-                      audio_seconds=1.0, audio_start_at=1.0, audio_end_at=2.0)
+                      audio_seconds=1.0, audio_start_at=100 * bit + 10 * joke, audio_end_at=100 * bit + 10 * joke + 2)
             log.write("reaction", bit=bit, joke=joke, source="button" if room == "live" else "sim", level=level,
                       key=None if level is None else KEYS[level], latency_s=0.5)
         given = [lv for lv in levels if lv is not None]
@@ -231,3 +236,57 @@ def test_the_cache_key_changes_when_the_recording_does(tmp_path):
     assert acceptance.digest([sid], tmp_path) != before
     wav.unlink()
     assert acceptance.digest([sid], tmp_path) not in (before,)  # a missing recording is not the same key either
+
+
+def test_a_pause_is_reported_with_its_seconds_and_the_jokes_it_cost(tmp_path):
+    # joke (0, 1) plays [10, 12]; (0, 2) starts at 20, exactly when the pause ends, so it is untouched
+    sid = write_show(tmp_path, full(), pauses=[(11.0, 20.0)])
+    s = acceptance.show_report(sid, tmp_path)
+    assert s["pauses"] == {"count": 1, "paused_s": 9.0, "jokes_dropped": 1}
+    assert s["labels"]["counts"]["K"] == 40 and s["labels"]["counts"]["none"] == 0  # key bias is the operator's presses
+    assert s["noise_stats"]["n_bits"] == 8  # the reward side still drops the label: bit 0 has 4 of 5
+    assert acceptance.show_report(write_show(tmp_path, full()), tmp_path)["pauses"] ==         {"count": 0, "paused_s": 0.0, "jokes_dropped": 0}
+
+
+def test_a_show_that_ended_paused_runs_the_pause_to_the_end_of_the_show(tmp_path):
+    s = acceptance.show_report(write_show(tmp_path, full(), pauses=[(200.0, None)], status="aborted"), tmp_path)
+    assert s["pauses"]["count"] == 1 and s["pauses"]["jokes_dropped"] == 30  # bits 2 to 7
+    assert s["pauses"]["paused_s"] > 700
+
+
+def test_paused_and_aborted_ratings_are_listed_but_not_in_the_reported_rating(tmp_path):
+    ids = [write_show(tmp_path, full(), rating=4, at=1000),
+           write_show(tmp_path, full(), rating=5, at=2000),
+           write_show(tmp_path, full(), rating=1, pauses=[(11.0, 12.0)], at=3000),
+           write_show(tmp_path, full()[:3], rating=2, status="aborted", at=4000)]
+    res = acceptance.run(ids, directory=tmp_path)
+    r = res["ratings"]
+    assert (r["n"], r["mean"], r["values"]) == (2, 4.5, [4, 5])
+    assert [(x["rating"], x["reason"]) for x in r["excluded"]] == [(1, "paused"), (2, "aborted")]
+    assert [s["rating"] for s in res["shows"]] == [4, 5, 1, 2]  # still listed
+    assert "(not counted)" in acceptance.table(res) and "not counted (paused)" in acceptance.verdict(res)
+
+
+def test_a_paused_show_is_not_marked_as_missing_audio(tmp_path):
+    # The recording keeps running through a pause, so the WAV spans it and the expected span is not reduced.
+    sid = write_show(tmp_path, full(), pauses=[(11.0, 20.0)],
+                     audio={"consent": True, "path": "rec.wav", "start_at": 1000.0})
+    span = acceptance.show_report(sid, tmp_path)["audio"]["log_span_s"]
+    with wave.open(str(tmp_path / "rec.wav"), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        w.writeframes(b"\0\0" * 16000 * int(span))
+    assert acceptance.show_report(sid, tmp_path)["audio"]["coverage"] == pytest.approx(1.0, abs=0.05)
+
+
+def test_a_pause_row_after_show_end_is_not_part_of_the_show(tmp_path):
+    sid = write_show(tmp_path, full())
+    path = tmp_path / f"{sid}.jsonl"
+    rows = path.read_text(encoding="utf-8").splitlines()
+    last = json.loads(rows[-1])
+    assert last["event"] == "show_end"
+    stray = {**last, "event": "pause", "paused_at": 11.0, "at": last["at"] + 5}
+    stray.pop("status")
+    path.write_text("\n".join(rows + [json.dumps(stray)]) + "\n", encoding="utf-8")
+    assert acceptance.show_report(sid, tmp_path)["pauses"] == {"count": 0, "paused_s": 0.0, "jokes_dropped": 0}

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useShow, type ShowSetup, type ShowState } from "./useShow";
-import { REACTIONS, keyInput, ratingFor, reactionKeyFor, type Room } from "./reactionKeys";
+import { REACTIONS, isPauseKey, keyInput, ratingFor, reactionKeyFor, type Room } from "./reactionKeys";
 import Waveform from "./Waveform";
 import styles from "./page.module.css";
 
@@ -21,7 +21,10 @@ const STATUS: Record<ShowState, string> = {
 const label = (value: string) => value.replace(/_/g, " ");
 
 export default function Home() {
-  const { state, line, analyser, start, room, reactionWindow, pressed, flash, notice, endStatus, rating, rate, react } = useShow();
+  const {
+    state, line, analyser, start, room, reactionWindow, pressed, flash, notice, endStatus, rating, rate, react,
+    paused, togglePause,
+  } = useShow();
   const [setup, setSetup] = useState<ShowSetup>({
     venue: "bar",
     energy: "normal",
@@ -40,14 +43,20 @@ export default function Home() {
   useEffect(() => {
     if (!busy) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      const key = reactionKeyFor(keyInput(event));
+      const input = keyInput(event);
+      if (isPauseKey(input)) {
+        event.preventDefault();
+        togglePause();
+        return;
+      }
+      const key = reactionKeyFor(input);
       if (!key) return;
       event.preventDefault(); // Space would scroll the page
       react(key);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [busy, react]);
+  }, [busy, react, togglePause]);
 
   // The prompt owns the digit keys only while it is up; the form's fields are not on screen then.
   const ratingOpen = rating === "ask";
@@ -107,9 +116,22 @@ export default function Home() {
 
       {busy ? (
         <section className={styles.panel} aria-label="Reactions">
-          <p className={canReact ? styles.windowOpen : styles.windowIdle} role="status">
-            {room === "sim" ? "Simulated room" : canReact ? "React now" : "Waiting for the line to finish"}
-          </p>
+          <div className={styles.controls}>
+            <p className={canReact ? styles.windowOpen : styles.windowIdle} role="status">
+              {paused ? "Paused" : room === "sim" ? "Simulated room" : canReact ? "React now" : "Waiting for the line to finish"}
+            </p>
+            {/* Never takes focus, like the reaction buttons, so Space can't press it. */}
+            <button
+              type="button"
+              tabIndex={-1}
+              className={styles.start}
+              aria-pressed={paused}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={togglePause}
+            >
+              {paused ? "Resume (P)" : "Pause (P)"}
+            </button>
+          </div>
           <div className={styles.buttons}>
             {REACTIONS.map(({ key, hint, meaning }) => {
               const lit = room === "live" ? pressed === key : flash === key;

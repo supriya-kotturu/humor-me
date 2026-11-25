@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from app.bank import load_bank
 from app.log import KEY_LEVELS, read_session
+from app.pauses import Pauses
 from app.rooms import SimRoom
 
 log = logging.getLogger(__name__)
@@ -20,8 +21,9 @@ class ButtonSource:
     timeout). A press outside it is never a `reaction` row: replay counts every row, so it is only noted in `log`."""
     source = "button"
 
-    def __init__(self, send, clock):
+    def __init__(self, send, clock, pauses=None):
         self.send, self.clock = send, clock
+        self.pauses = Pauses() if pauses is None else pauses  # the window and the hold stop while the show is paused
         self._window: tuple[int, int] | None = None
         self._opened = 0.0
         self._presses: asyncio.Queue = asyncio.Queue()
@@ -46,7 +48,7 @@ class ButtonSource:
         self._window, self._opened = (bit, joke), self.clock.now()
         await self.send({"type": "reaction_window", "state": "open", "bit": bit, "joke": joke})
         try:
-            return await asyncio.wait_for(self._presses.get(), timeout)
+            return await self.pauses.get_within(self._presses, timeout)
         except asyncio.TimeoutError:
             await self._close()
             return None, None, timeout
@@ -55,7 +57,7 @@ class ButtonSource:
         if self._window is None:  # timed out: nothing to hold for
             return None
         try:
-            return await asyncio.wait_for(self._presses.get(), seconds)
+            return await self.pauses.get_within(self._presses, seconds)
         except asyncio.TimeoutError:
             await self._close()
             return None

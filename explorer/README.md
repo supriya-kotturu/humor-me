@@ -101,7 +101,7 @@ mode (±0.29/√n), not on the share of the 400k labeled.
 Runs `explorer/judge_generators.py` on a bundle the laptop writes: the generated bits of Exp 24 and your rankings, as prompts
 (our own jokes only, no rJokes, no model names, no key file). Output is a ranking of letters per call. Everything lives under
 `data/model_comparison/judge/` (gitignored). Why Qwen: it is neither candidate's family, and it is already cached here
-(D-92).
+(D-93).
 
 | Step | Where | How |
 |---|---|---|
@@ -118,7 +118,7 @@ The `--max-len 30000` default is Qwen2.5's 32k context less room for the reply.
 ## Exp 24 judge with Ollama (first model to try: qwen3.8:27b)
 
 The same bundle and the same steps as the Qwen2.5-7B judge above, with an Ollama server inside the job. Why: the user picked
-`qwen3.8:27b` from Ollama's local list; it is neither Gemini nor Claude, and a 27B model at 4 bit (about 17 GB) fits a V100 (D-92).
+`qwen3.8:27b` from Ollama's local list; it is neither Gemini nor Claude, and a 27B model at 4 bit (about 17 GB) fits a V100 (D-93).
 Qwen2.5-7B stays the fallback.
 
 **Before you rely on it (not verified from here):**

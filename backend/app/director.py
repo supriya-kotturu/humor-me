@@ -2,6 +2,7 @@
 `update` calls the show made. Reward is recomputed from the reaction rows, never read from `bit_end.reward`.
 A reaction row counts toward the reward whenever it is in the log, so the live loop must not write reaction rows
 for a window that has closed."""
+from app.pauses import paused_jokes
 from app.reward import reward_v1
 from sim.env import AudienceEnv, Context
 from sim.policies import EpsilonSoft, LinUCB, prior_means
@@ -9,10 +10,12 @@ from sim.policies import EpsilonSoft, LinUCB, prior_means
 EPSILON = 0.2
 
 
-def joke_levels(rows: list[dict], bit: int) -> list[int | None]:
+def joke_levels(rows: list[dict], bit: int, keep_paused: bool = False) -> list[int | None]:
     """One level per joke of the bit. Among button rows the last in log order wins, a null timeout included
     (a later press overrides an earlier one, a later timeout does not resurrect it). With no button row, the
-    last row of any other source."""
+    last row of any other source. A joke whose playback overlapped a pause is None whatever was pressed (D-92), unless
+    `keep_paused` asks for what the operator really pressed (the key-bias check, which is about the operator)."""
+    spoiled = set() if keep_paused else paused_jokes(rows, bit)
     by_joke: dict[int, dict[str, dict]] = {}
     for r in rows:
         if r["event"] == "reaction" and r["bit"] == bit:
@@ -20,7 +23,7 @@ def joke_levels(rows: list[dict], bit: int) -> list[int | None]:
     out = []
     for joke in sorted(by_joke):
         picked = by_joke[joke].get("button") or by_joke[joke]["other"]
-        out.append(picked["level"])
+        out.append(None if joke in spoiled else picked["level"])
     return out
 
 

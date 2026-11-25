@@ -26,6 +26,8 @@ VALID = {
     "reaction": dict(bit=0, joke=0, source="button", level=2, key="K", latency_s=0.4),
     "gap": dict(bit=0, joke=0, planned_hold_s=1.5, actual_gap_s=1.6),
     "bit_end": dict(bit=0, n_labels=5, reward_version=1, reward=0.5),
+    "pause": dict(paused_at=1700000000.5),
+    "resume": dict(resumed_at=1700000009.5),
     "rating": dict(value=4),
     "show_end": dict(status="finished"),
 }
@@ -208,3 +210,28 @@ def test_a_v1_log_is_still_read_and_a_v1_row_cannot_be_a_bridge(tmp_path):
     path.write_text(json.dumps(bridge) + "\n")
     with pytest.raises(ValueError, match="bridge"):
         read_session(path)
+
+
+@pytest.mark.parametrize("event", ["pause", "resume"])
+def test_pause_rows_need_a_numeric_show_clock_time_and_a_v1_log_has_none(tmp_path, event):
+    field = "paused_at" if event == "pause" else "resumed_at"
+    log = SessionLog(tmp_path)
+    for bad in ("12", None, True):
+        with pytest.raises(ValueError, match="number"):
+            log.write(event, **{field: bad})
+    with pytest.raises(ValueError, match="missing"):
+        log.write(event)
+    assert not log.path.exists()
+    row = {"schema": 1, "session": "s", "at": 1.0, "event": event, field: 5.0}
+    path = tmp_path / "v1.jsonl"
+    path.write_text(json.dumps(row) + "\n")
+    with pytest.raises(ValueError, match=event):
+        read_session(path)
+
+
+def test_a_v2_log_from_before_pauses_reads_unchanged(tmp_path):
+    rows = [{"schema": 2, "session": "s", "at": 1.0, "event": "rating", "value": 4},
+            {"schema": 2, "session": "s", "at": 2.0, "event": "show_end", "status": "finished"}]
+    path = tmp_path / "old2.jsonl"
+    path.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    assert read_session(path) == rows

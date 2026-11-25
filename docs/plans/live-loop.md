@@ -66,6 +66,7 @@ only during a reaction window and never while typing in a form. Use `event.code`
 ### Reward
 
 - `reward_v1(levels)`: per bit, mean of the non-null levels ÷ 3. With fewer than 3 labels out of 5 it returns `None`, and the director does not update.
+- A joke whose playback overlapped a pause counts as a null label (D-92): `app.pauses.overlaps(audio_start_at, audio_end_at, pauses)` decides, in the live loop and in replay alike. The show holds while paused (no line starts, the reaction window and the hold freeze), so only a line that was playing is hit. The `reaction` row keeps the pressed level; only the reward ignores it.
 - A "laugh" in any reported rate is level ≥ 2.
 - Labels are the record. Reward is always derived from them and never stored as the source of truth.
 - A key press overrides any future detector output for the same joke.
@@ -95,6 +96,8 @@ JSONL, one file per show in `data/sessions/`. Every row has `schema: 2`, `sessio
 | `reaction` | `bit`, `joke`, `source` (`button`\|`detector`\|`sim`), `level` (0–3 or null), `key`, `latency_s` |
 | `gap` | `bit`, `joke`, `planned_hold_s`, `actual_gap_s` |
 | `bit_end` | `bit`, `n_labels`, `reward_version`, `reward` (cross-check only) |
+| `pause` | `paused_at`: the show clock (same timebase as `audio_start_at`), written when the browser pauses, even between bits or in the reaction window (v2, D-92) |
+| `resume` | `resumed_at`: the show clock. A pause with no resume means the show ended paused and runs to the end of the show (v2, D-92) |
 | `rating` | `value` (1–5) |
 | `show_end` | `status` (`finished`\|`aborted`) |
 
@@ -168,7 +171,7 @@ Runs in parallel once T0 is merged: T1, T2, T7, T8.
 
 - **Goal:** the browser can start a show and send reactions.
 - **Files:** `backend/app/main.py`, new `backend/app/protocol.py`, `tests/test_show_loop.py`, `backend/README.md`.
-- **Build:** client messages `start` (context, room), `played`, `reaction` (bit, joke, key). Server messages `line`, `reaction_window` (open, closed), `show_end`. Reject malformed messages without ending the show. Reactions for a closed window are logged and ignored.
+- **Build:** client messages `start` (context, room), `played`, `reaction` (bit, joke, key), `pause`, `resume` (D-92; out of order is an `error`). Server messages `line`, `reaction_window` (open, closed), `pause_state`, `show_end`. Reject malformed messages without ending the show. Reactions for a closed window are logged and ignored.
 - **Tests:** a whole show over `TestClient` with fake TTS; a late reaction doesn't change the reward; a disconnect marks the show aborted.
 - **Experiment:** none.
 
@@ -245,8 +248,8 @@ Runs in parallel once T0 is merged: T1, T2, T7, T8.
 - **Goal:** choose the model that writes the show's bits: Gemini Flash-Lite (today's), Gemini Flash, or Claude Haiku 5.5.
 - **Build:** a Claude client on the official SDK beside the Gemini one (same `chat`, same errors, same deadline and re-ask), chosen by `JOKE_WRITER_PROVIDER`; `sim/compare_generators.py` runs 60 fixed prompts (30 voted on) through each model exactly as a show does, then the same safety filter. The user ranks the models' safe threads per prompt, blind.
 - **Bar, fixed before any run (changed after review, before any data):** a model is eligible if (1) the p95 latency over all its calls is at most 12 s (the generator's deadline), a call that timed out counting as above it, and (2) the 95% Wilson upper bound of its failure rate, over every attempt made, is at most 15%, measured on 60 distinct prompts per model, one attempt each: up to 3 failures pass and 4 fail (a model failing 3% of the time is ruled out about 11% of the time, one failing 10% slips through about 14%, assuming independent attempts, which distinct prompts make closer to true than repeats would). Only the first 30 prompts are voted on; the other 30 count toward failures and latency. Among eligible models the best mean rank wins if the paired 95% CI of the rank gap to the next excludes 0. Otherwise funniness is called inconclusive and the cheaper, then faster, of the two is picked. If none is eligible the generator stays as it is. A model with no safe thread for a prompt is ranked last for it, and the prompt is kept.
-- **Judge (added after review, before any data, D-92):** Qwen2.5-7B-Instruct on Explorer (neither candidate's family), shown the user's 30 ranked prompts, ranks prompts 31 to 60, each in one order per position (cyclic rotation). It joins the user's votes only if, leave-one-out on the user's own prompts, its top pick matches the user's at least 60% of the time with the 95% interval's lower end above chance, its pairwise order agreement's lower end is above 50%, and no model's judge-minus-user rank gap has a CI beyond 0.3 ranks (the bias check is the reviewer's addition, open to the user's veto). Otherwise the user's 30 votes decide alone. Residual risk (D-92): a judge tilted about 0.5 ranks toward one model passes the bias check about 70% of the time, and pooling then inflates false "clearly funnier" calls from 1 to 3% to 18 to 27%; 30 prompts cannot certify the judge unbiased. The first model to try is Ollama's `qwen3.8:27b` (Explorer job, with a context-truncation guard), with Qwen2.5-7B as the fallback. Run steps: `explorer/README.md`, "Exp 24 judge".
-- **Power:** the 30 voted prompts detect only a large funniness gap (about 0.8 ranks, 81% of the time); the gap's CI half-width is about 0.5 ranks (D-92).
+- **Judge (added after review, before any data, D-93):** Qwen2.5-7B-Instruct on Explorer (neither candidate's family), shown the user's 30 ranked prompts, ranks prompts 31 to 60, each in one order per position (cyclic rotation). It joins the user's votes only if, leave-one-out on the user's own prompts, its top pick matches the user's at least 60% of the time with the 95% interval's lower end above chance, its pairwise order agreement's lower end is above 50%, and no model's judge-minus-user rank gap has a CI beyond 0.3 ranks (the bias check is the reviewer's addition, open to the user's veto). Otherwise the user's 30 votes decide alone. Residual risk (D-93): a judge tilted about 0.5 ranks toward one model passes the bias check about 70% of the time, and pooling then inflates false "clearly funnier" calls from 1 to 3% to 18 to 27%; 30 prompts cannot certify the judge unbiased. The first model to try is Ollama's `qwen3.8:27b` (Explorer job, with a context-truncation guard), with Qwen2.5-7B as the fallback. Run steps: `explorer/README.md`, "Exp 24 judge".
+- **Power:** the 30 voted prompts detect only a large funniness gap (about 0.8 ranks, 81% of the time); the gap's CI half-width is about 0.5 ranks (D-93).
 - **Run (the user's keys and votes):** `backend/README.md`, "Comparing generator models". Only numbers reach `reports/metrics/model_comparison.json`.
 
 ## Later stages (planned after T11)

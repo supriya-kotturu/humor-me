@@ -16,6 +16,16 @@ def _int(msg: dict, field: str) -> int:
     return value
 
 
+def check_pause(kind: str, *, running: bool, paused: bool) -> None:
+    """Order rules for `pause` and `resume`, given the session's state. Raises ProtocolError; the show goes on."""
+    if not running:
+        raise ProtocolError(f"{kind} refused: no show is running")
+    if kind == "pause" and paused:
+        raise ProtocolError("pause refused: the show is already paused")
+    if kind == "resume" and not paused:
+        raise ProtocolError("resume refused: the show is not paused")
+
+
 def parse(frame: dict) -> dict:
     """The ASGI websocket frame in, a checked message out. Raises ProtocolError; the connection stays open."""
     text = frame.get("text")
@@ -29,6 +39,8 @@ def parse(frame: dict) -> dict:
         raise ProtocolError("message must be a JSON object")
     kind = msg.get("type")
     if kind == "played":
+        return {"type": kind}
+    if kind in ("pause", "resume"):  # order is checked by `check_pause`: it needs the show's state
         return {"type": kind}
     if kind == "audio_health":
         health = {}

@@ -14,7 +14,8 @@ from app import llm
 from app.generate import llm_stack
 from app.live import AnnouncedSim, BankOnlySafety, ButtonSource, WebSocketPlayer, git_sha, load_sessions
 from app.log import SESSIONS, SessionLog, read_session
-from app.protocol import ProtocolError, parse
+from app.pauses import Pauses
+from app.protocol import ProtocolError, check_pause, parse
 from app.recording import Recorder
 from app.rooms import REACTION, RealClock
 from app.show import UniformSelector, run_show
@@ -143,26 +144,48 @@ async def _rate(ws: WebSocket, live: types.SimpleNamespace, value: int) -> None:
     await ws.send_json({"type": "error", "message": refusal})
 
 
+async def _pause(ws: WebSocket, live: types.SimpleNamespace, kind: str) -> None:
+    """Write the pause or resume row on the show's clock, so it lines up with `audio_start_at` and the recording. A show
+    is running from just before `show_start` is written to the moment `run_show` returns or raises, so a pause during
+    the microphone prompt or after `show_end` is refused. While paused the show holds: no line starts, and the reaction
+    window and the hold stop their timers (`app.pauses`). Refusals carry `about: "pause"` so the browser undoes only
+    its own pause."""
+    try:
+        check_pause(kind, running=live.running, paused=live.pauses.paused)
+        now = live.clock.now()
+        live.log.write(kind, **{"paused_at" if kind == "pause" else "resumed_at": now})
+        (live.pauses.pause if kind == "pause" else live.pauses.resume)(now)  # after the write: a failed row changes nothing
+        await ws.send_json({"type": "pause_state", "paused": kind == "pause"})
+    except ProtocolError as e:
+        await ws.send_json({"type": "error", "about": "pause", "message": str(e)})
+    except OSError as e:
+        await ws.send_json({"type": "error", "about": "pause", "message": f"{kind} not saved: {e}"})
+
+
 async def _show(ws: WebSocket, msg: dict, played: asyncio.Queue, live: types.SimpleNamespace) -> None:
     seed = secrets.randbits(32)  # the director's seed, logged as policy.seed; selector and sim draw their own
     try:
         sessions, sha, tts = await asyncio.gather(asyncio.to_thread(load_sessions, sessions_dir),
                                                   asyncio.to_thread(git_sha), asyncio.to_thread(get_tts))
         director = load_director(sessions, seed=seed)
-        clock = RealClock()
+        clock = live.clock = RealClock()
         show_log = live.log = SessionLog(sessions_dir)
         audio = await _open_recorder(ws, live, show_log) if msg["consent"] else None
         if msg["room"] == "live":
-            source = live.source = ButtonSource(ws.send_json, clock)
+            source = live.source = ButtonSource(ws.send_json, clock, live.pauses)
         else:
             source = AnnouncedSim(ws.send_json, msg["context"], secrets.randbits(32))
         generator, safety, fallback, bridge_lines = make_stack(msg["room"])
-        await run_show(director, msg["room"], msg["context"], generator=generator, safety=safety,
-                       selector=UniformSelector(secrets.randbits(32)), tts=tts,
-                       player=WebSocketPlayer(ws.send_json, ws.send_bytes, played), source=source,
-                       clock=clock, log=show_log, explore_seed=seed, operator=msg["operator"],
-                       audio=audio, git_sha=sha, config=reaction_config, fallback=fallback, bridge_lines=bridge_lines,
-                       cached=cached_for(bridge_lines, sessions))
+        live.running = True  # cleared with no await in between when run_show returns or raises, so a pause after show_end is refused
+        try:
+            await run_show(director, msg["room"], msg["context"], generator=generator, safety=safety,
+                           selector=UniformSelector(secrets.randbits(32)), tts=tts,
+                           player=WebSocketPlayer(ws.send_json, ws.send_bytes, played), source=source,
+                           clock=clock, log=show_log, pauses=live.pauses, explore_seed=seed, operator=msg["operator"],
+                           audio=audio, git_sha=sha, config=reaction_config, fallback=fallback,
+                           bridge_lines=bridge_lines, cached=cached_for(bridge_lines, sessions))
+        finally:
+            live.running = False
         status = "finished"
     except Exception as e:  # cancellation is not caught: a closed socket has nobody to tell
         log.exception("show failed")
@@ -184,7 +207,8 @@ async def _show(ws: WebSocket, msg: dict, played: asyncio.Queue, live: types.Sim
 async def session(ws: WebSocket) -> None:
     await ws.accept()
     played: asyncio.Queue = asyncio.Queue()
-    live = types.SimpleNamespace(source=None, recorder=None, late=False, health=None, log=None)  # late: audio was asked for and ended
+    live = types.SimpleNamespace(source=None, recorder=None, late=False, health=None, log=None,
+                                 clock=None, pauses=Pauses(), running=False)  # late: audio was asked for and ended
     show = None
     try:
         while True:  # keeps running while the show does, so keys and "played" are heard
@@ -213,6 +237,8 @@ async def session(ws: WebSocket) -> None:
                     live.recorder.abandon(msg["reason"])
                 else:  # it failed after audio began: the file so far stays, the show goes on
                     await _release(ws, live, msg["reason"])
+            elif msg["type"] in ("pause", "resume"):
+                await _pause(ws, live, msg["type"])
             elif msg["type"] == "rating":
                 await _rate(ws, live, msg["value"])
             elif msg["type"] == "reaction":
@@ -223,6 +249,7 @@ async def session(ws: WebSocket) -> None:
             else:
                 live.late = False
                 live.log = None  # the previous show can no longer be rated
+                live.clock, live.pauses = None, Pauses()
                 show = asyncio.create_task(_show(ws, msg, played, live))
     except WebSocketDisconnect:
         pass

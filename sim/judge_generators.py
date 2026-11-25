@@ -16,7 +16,7 @@ agrees with them, leave-one-out (each of the user's prompts judged seeing only t
   2. pairwise agreement (the share of bit pairs ordered as the user ordered them) with the interval's lower end above 50%;
   3. per model, the mean judge-minus-user rank gap with a bootstrap 95% CI over prompts must not lie beyond 0.3 ranks.
 
-(3 is the reviewer's addition, open to the user's veto, D-92.) A run in which any call was not answered for an outage,
+(3 is the reviewer's addition, open to the user's veto, D-93.) A run in which any call was not answered for an outage,
 a bad key or a missing reply is `incomplete`: it joins nothing and the gate is not decided. Replies are cached on disk beside
 the generations (gitignored), keyed by a hash of the judge, its exact system and user messages (so a changed vote, example
 or bit asks again). Only numbers and prompt ids are stored in `judge_result.json`.
@@ -39,7 +39,7 @@ from app import llm  # noqa: E402
 from sim import compare_generators as cg  # noqa: E402
 from sim.evaluate_safety import wilson  # noqa: E402
 
-JUDGE_MODEL = "qwen2.5-7b-instruct"  # why this one: docs/agent/decisions-detail.md D-92
+JUDGE_MODEL = "qwen2.5-7b-instruct"  # why this one: docs/agent/decisions-detail.md D-93
 JUDGES = {
     # Run on Explorer from a bundle (explorer/judge_generators.py); no API, no price, no live client.
     JUDGE_MODEL: cg.Spec(JUDGE_MODEL, "explorer", "Qwen/Qwen2.5-7B-Instruct", 0.0, 0.0, "explorer", 0.0),

@@ -6,7 +6,7 @@ import pathlib
 import time
 import uuid
 
-SCHEMA = 2  # v2 adds the `bridge` event; a v1 log has none and replays unchanged
+SCHEMA = 2  # v2 adds the `bridge`, `cache`, `pause` and `resume` events; a v1 log has none and replays unchanged
 READABLE = (1, 2)
 SESSIONS = pathlib.Path(__file__).resolve().parents[2] / "data" / "sessions"
 
@@ -22,6 +22,8 @@ EVENTS = {
     "reaction": ("bit", "joke", "source", "level", "key", "latency_s"),
     "gap": ("bit", "joke", "planned_hold_s", "actual_gap_s"),
     "bit_end": ("bit", "n_labels", "reward_version", "reward"),
+    "pause": ("paused_at",),  # the show clock (the same timebase as `audio_start_at`), written when the browser pauses
+    "resume": ("resumed_at",),
     "rating": ("value",),
     "show_end": ("status",),
 }
@@ -71,7 +73,7 @@ def validate(record: dict) -> None:
     event = record["event"]
     if not isinstance(event, str) or event not in EVENTS:
         raise ValueError(f"unknown event {event!r}")
-    if event in ("bridge", "cache") and record["schema"] < 2:
+    if event in ("bridge", "cache", "pause", "resume") and record["schema"] < 2:
         raise ValueError(f"a schema 1 log has no {event} event")
     _need_keys(event, record, EVENTS[event])
     for (name, field), allowed in CHOICES.items():
@@ -109,6 +111,10 @@ def validate(record: dict) -> None:
             raise ValueError(f"reaction.key {key!r} means level {KEY_LEVELS[key]}, got {level!r}")
         if record["source"] == "button" and key is None and level is not None:
             raise ValueError("a button reaction with no key is a timeout, so level must be null")
+    if event in ("pause", "resume"):
+        at = record["paused_at" if event == "pause" else "resumed_at"]
+        if isinstance(at, bool) or not isinstance(at, (int, float)):
+            raise ValueError(f"{event} time must be a number, got {at!r}")
     if event == "rating" and not (_is_int(record["value"]) and 1 <= record["value"] <= 5):
         raise ValueError(f"rating.value must be 1-5, got {record['value']!r}")
 

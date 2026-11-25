@@ -9,6 +9,7 @@ import numpy as np
 
 from app.cache import CachedBit, screen
 from app.log import SessionLog
+from app.pauses import Pauses, overlaps
 from app.reward import VERSION, reward_v1
 from app.rooms import REACTION
 from app.tts import wav_seconds
@@ -228,8 +229,9 @@ async def _speak(plan: _Plan, tts, clock):
         await plan.bank()
 
 
-async def _joke(bit, joke, plans, *, tts, player, source, clock, log, config, spawn):
-    """One joke, end to end. Returns the level, or None when nothing was played or the room did not answer."""
+async def _joke(bit, joke, plans, *, tts, player, source, clock, log, config, spawn, pauses):
+    """One joke, end to end. Returns the level for the bit's reward, or None when nothing was played, the room did not
+    answer, or a pause overlapped the playback (D-92: the label is still logged, replay drops it by the same rule)."""
     plan = plans[joke]
     _start_render(plans, joke, tts, clock, spawn)
     _start_render(plans, joke + 1, tts, clock, spawn)
@@ -240,9 +242,11 @@ async def _joke(bit, joke, plans, *, tts, player, source, clock, log, config, sp
         return None  # unlabeled: no reaction row, so replay sees the same thing
     chosen, prob, wav, tts_seconds = spoken
     text = plan.items[chosen]["text"]
+    await pauses.running()  # the show holds while paused, so this line's span holds no pause that began before it
     start = clock.now()
     await player.play(wav, text)
     end = clock.now()
+    spoiled = overlaps(start, end, pauses.intervals())  # no await since `end`, so a later pause cannot be missed
     log.write("joke_played", bit=bit, joke=joke, chosen=chosen, pick_prob=prob, text=text,
               tts_seconds=tts_seconds, audio_seconds=wav_seconds(wav), audio_start_at=start, audio_end_at=end)
     level, key, latency = await source.reaction(bit, joke, config.timeout_s)
@@ -256,7 +260,7 @@ async def _joke(bit, joke, plans, *, tts, player, source, clock, log, config, sp
         level, key, latency = fix  # last press wins; the hold restarts at the new level's length
         log.write("reaction", bit=bit, joke=joke, source=source.source, level=level, key=key, latency_s=latency)
     log.write("gap", bit=bit, joke=joke, planned_hold_s=hold, actual_gap_s=clock.now() - before)
-    return level
+    return None if spoiled else level
 
 
 # A bit prepares after the previous one ends, so the wait is generation (deadline 12 s) then the filter (25 s), about
@@ -325,19 +329,21 @@ async def _render_cached(entries: list[_Cached], tts, clock, after: asyncio.Task
         e.ready.set()
 
 
-async def _play_cached(e: _Cached, player, *, bit, clock, log) -> None:
+async def _play_cached(e: _Cached, player, *, bit, clock, log, pauses) -> None:
     """A cached line is a `bridge` row marked cached, never a reaction window (replay must see no new labels)."""
     e.used = True  # before the await: a line is never said twice in a show
+    await pauses.running()
     start = clock.now()
     await player.play(e.wav, e.text)
     log.write("bridge", bit=bit, text=e.text, tts_seconds=e.seconds, audio_start_at=start, audio_end_at=clock.now(),
               kind="cached", source=e.source)
 
 
-async def _open_cached(prep: asyncio.Task, entries: list[_Cached], player, *, clock, log) -> None:
+async def _open_cached(prep: asyncio.Task, entries: list[_Cached], player, *, clock, log, pauses) -> None:
     """Fill the show-open wait with one cached bit's lines, in order, while bit 0 prepares. Waits for the next line's
     render only while bit 0 is still not ready, so a render never delays the bit itself."""
     for e in entries[:OPEN_CAP]:
+        await pauses.running()
         if prep.done():
             return
         if not e.ready.is_set():
@@ -349,7 +355,7 @@ async def _open_cached(prep: asyncio.Task, entries: list[_Cached], player, *, cl
             if prep.done():
                 return
         if e.wav is not None:
-            await _play_cached(e, player, bit=0, clock=clock, log=log)
+            await _play_cached(e, player, bit=0, clock=clock, log=log, pauses=pauses)
 
 
 def _next_cached(pool: list[list[_Cached]], mode: str | None) -> _Cached | None:
@@ -358,16 +364,17 @@ def _next_cached(pool: list[list[_Cached]], mode: str | None) -> _Cached | None:
     return next((e for e in ready if e.mode == mode), ready[0] if ready else None)
 
 
-async def _bridge(prep: asyncio.Task, rendered: list, player, used: list, *, bit, clock, log,
+async def _bridge(prep: asyncio.Task, rendered: list, player, used: list, *, bit, clock, log, pauses,
                   pool: list[list[_Cached]] = (), mode: str | None = None) -> None:
     """Fill the wait for the next bit with cached lines first (the next bit's mode preferred), then in-character
     bridge lines. Uses whatever has rendered so far and never blocks on the rest; a line is not repeated while an
     unused one remains. Each line played is a `bridge` row, because it is audio the room heard (invariant 6)."""
     for _ in range(MAX_BRIDGES):
+        await pauses.running()  # also what keeps the filler path below free of an await before `start`
         if prep.done():
             return
         if cached := _next_cached(pool, mode):
-            await _play_cached(cached, player, bit=bit, clock=clock, log=log)
+            await _play_cached(cached, player, bit=bit, clock=clock, log=log, pauses=pauses)
             continue
         if not rendered:
             return
@@ -385,10 +392,11 @@ async def run_show(director, room: str, context: dict, *, generator: Generator, 
                    explore_seed: int | None = None, operator: str = "sim", git_sha: str = "unknown",
                    audio: dict | None = None, n_bits: int = 8, jokes_per_bit: int = 5, config=REACTION,
                    fallback: Generator | None = None, bridge_lines: list[str] | None = None,
-                   cached: dict[str, list[CachedBit]] | None = None) -> None:
+                   cached: dict[str, list[CachedBit]] | None = None, pauses: Pauses | None = None) -> None:
     """One show. `director` is an EpsilonSoft over LinUCB, already warm: the caller replays the career into it
     (app.director.load_director) so this loop never decides which rooms count."""
     modes = AudienceEnv().modes
+    pauses = Pauses() if pauses is None else pauses  # the server's handler writes the rows and updates this; a headless show never pauses
     inner = director.inner
     tasks: set[asyncio.Task] = set()  # the live ones, so an abort can cancel them and a long show does not keep every render
 
@@ -438,9 +446,9 @@ async def run_show(director, room: str, context: dict, *, generator: Generator, 
                 # mode, else the best of any, and render it now, while the voice is free.
                 opener = next((g for g in pool if g[0].mode == modes[action]), pool[0])
                 opened = spawn(_render_cached(opener[:OPEN_CAP], tts, clock))
-                await _open_cached(prep, opener, player, clock=clock, log=log)
+                await _open_cached(prep, opener, player, clock=clock, log=log, pauses=pauses)
             elif (bridge_lines or pool) and bit > 0:
-                await _bridge(prep, rendered, player, bridges_used, bit=bit, clock=clock, log=log, pool=pool,
+                await _bridge(prep, rendered, player, bridges_used, bit=bit, clock=clock, log=log, pauses=pauses, pool=pool,
                               mode=modes[action])
             plans = await prep
             if bit == 0:
@@ -451,7 +459,7 @@ async def run_show(director, room: str, context: dict, *, generator: Generator, 
                 if bridge_lines:
                     spawn(render_bridges())
             levels = [await _joke(bit, joke, plans, tts=tts, player=player, source=source, clock=clock, log=log,
-                                  config=config, spawn=spawn) for joke in range(jokes_per_bit)]
+                                  config=config, spawn=spawn, pauses=pauses) for joke in range(jokes_per_bit)]
             reward = reward_v1(levels)
             log.write("bit_end", bit=bit, n_labels=sum(lv is not None for lv in levels), reward_version=VERSION,
                       reward=reward)

@@ -4,7 +4,7 @@ Usage (needs keys in backend/.env, see backend/README.md "Comparing generator mo
     python -m sim.compare_generators run --env-file backend/.env            # generate + safety, resumable, paced
     python -m sim.compare_generators export                                  # blind ballot for the user, local only
     python -m sim.compare_generators vote                                    # rank each prompt in the terminal
-    python -m sim.compare_generators judge                                   # a judge calibrated on your votes ranks prompts 31-60
+    python -m sim.compare_generators judge --export-bundle <dir> | --import-replies <file>   # a judge taught by your votes (Explorer)
     python -m sim.compare_generators score [--rerun]                         # numbers -> reports/metrics/model_comparison.json
 
 Each prompt is one bit, generated exactly as a show does it (`generate.GeminiGenerator`, one call, 3 threads of 5
@@ -607,20 +607,26 @@ def votes_digest(directory: pathlib.Path) -> str:
     return _digest((key_path(directory), directory / "votes.csv", judge_path(directory)))
 
 
-def judge_ranks(directory: pathlib.Path, models: list[str], n_ballot: int) -> tuple[dict, dict]:
+def judge_ranks(directory: pathlib.Path, models: list[str], n_ballot: int, n_prompts: int = N_PROMPTS) -> tuple[dict, dict]:
     """(ranks to add to the user's votes, the judge's summary). The ranks are the judge's for prompts after the
-    ballot, only when its result is current (calibrated on these very votes) and passed its bar; otherwise empty."""
+    ballot, only when its result is current (calibrated on these very votes, with this judge prompt and order scheme, for
+    this many prompts), complete (every call answered) and passed its bar; otherwise empty."""
+    from sim import judge_generators as jg  # lazy: the judge module imports this one
     jp = judge_path(directory)
     if not jp.exists():
         return {}, {"state": "not run"}
     res = json.loads(jp.read_text(encoding="utf-8"))
-    if res.get("ballot_digest") != ballot_digest(directory) or res.get("n_ballot") != n_ballot:
-        return {}, {"state": "stale", "joined": False, "reason": "the votes changed since the judge ran"}
+    if (res.get("ballot_digest") != ballot_digest(directory) or res.get("n_ballot") != n_ballot or res.get("n_prompts") != n_prompts
+            or res.get("prompt_digest") != jg.prompt_digest() or res.get("scheme") != jg.SCHEME):
+        return {}, {"state": "stale", "joined": False,
+                    "reason": "the votes, the number of prompts, or the judge's prompt or order scheme changed since it ran"}
+    if res.get("incomplete"):
+        return {}, {"state": "incomplete", "joined": False, "reason": res["reason"]}
     summary = {k: v for k, v in res.items() if k not in ("judge_ranks", "loo")}
     summary["state"] = "joined" if res["joined"] else "not joined"
     if not res["joined"]:
         return {}, summary
-    ids = {p["id"] for p in prompts(N_PROMPTS)[n_ballot:]}
+    ids = {p["id"] for p in prompts(n_prompts)[n_ballot:]}
     ranks = {pid: rerank(r, models) for pid, r in res["judge_ranks"].items() if pid in ids and set(models) <= set(r)}
     return ranks, summary
 
@@ -647,7 +653,7 @@ def run(gen: str = "", votes: str = "", n_prompts: int = N_PROMPTS, n_ballot: in
     key = json.loads(kp.read_text(encoding="utf-8")) if kp.exists() else {}
     key = {p: k for p, k in key.items() if p in {q["id"] for q in prompts(n_ballot, seed)}}
     user_ranks = ranks_from_votes(read_votes(directory / "votes.csv"), key, models)
-    extra, judge = judge_ranks(directory, models, n_ballot)  # empty unless the judge agreed with the user
+    extra, judge = judge_ranks(directory, models, n_ballot, n_prompts)  # empty unless the judge agreed with the user
     ranks = {**user_ranks, **extra}
     by_id = {p["id"]: p for p in prompts(n_prompts, seed)}
     return {"models": stats, "n_prompts": n_prompts, "n_ballot": n_ballot, "n_key": len(key), "n_scored": len(ranks),
@@ -696,7 +702,12 @@ def main() -> None:
     ap.add_argument("--models", default=",".join(MODELS))
     ap.add_argument("--redo-failed", action="store_true",
                     help="add an attempt where the last one failed for a key, setting or provider-availability reason")
-    ap.add_argument("--judge-model", default=None, help="the judge's model key (default: see sim/judge_generators.py)")
+    ap.add_argument("--judge-model", default=None, help="the judge (default qwen2.5-7b-instruct, run on Explorer)")
+    ap.add_argument("--judge-provider", default=None, choices=["explorer", "ollama", "anthropic", "gemini"],
+                    help="judge: ollama uses any Ollama model (default qwen3.8:27b) through its /v1 endpoint or an Explorer job")
+    ap.add_argument("--export-bundle", metavar="DIR", help="judge: write the calls for Explorer (calls.jsonl) to DIR and stop")
+    ap.add_argument("--import-replies", metavar="FILE", help="judge: read the cluster's replies.jsonl back and score the judge")
+    ap.add_argument("--smoke", type=int, default=0, help="with --export-bundle: only the calls of the first N prompts")
     ap.add_argument("--rerun", action="store_true")
     a = ap.parse_args()
     if a.env_file:
@@ -718,7 +729,7 @@ def main() -> None:
         print(f"ballot: {run_dir() / 'ballot.md'}  votes: {run_dir() / 'votes.csv'}")
     elif a.command == "judge":
         from sim import judge_generators
-        judge_generators.main(models, a.n, a.ballot, a.judge_model)
+        judge_generators.main(models, a.n, a.ballot, a.judge_model, a.export_bundle, a.import_replies, a.smoke, a.judge_provider)
     elif a.command == "vote":
         print(f"{vote_interactively()} votes saved to {run_dir() / 'votes.csv'}")
     else:

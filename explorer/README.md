@@ -96,6 +96,55 @@ The batch run was faster: **5.2 jokes/s, 30k in ~1.6 h, 11 parse failures** (job
 mean percentile is wider than ±0.02, extend by 30k and recheck. Precision depends on jokes per
 mode (±0.29/√n), not on the share of the 400k labeled.
 
+## Exp 24 judge (Qwen ranks generated bits from your votes)
+
+Runs `explorer/judge_generators.py` on a bundle the laptop writes: the generated bits of Exp 24 and your rankings, as prompts
+(our own jokes only, no rJokes, no model names, no key file). Output is a ranking of letters per call. Everything lives under
+`data/model_comparison/judge/` (gitignored). Why Qwen: it is neither candidate's family, and it is already cached here
+(D-92).
+
+| Step | Where | How |
+|---|---|---|
+| 1. Bundle | laptop | `python -m sim.compare_generators judge --export-bundle data/model_comparison/judge` (smoke: add `--smoke 3`). Writes `calls.jsonl`. Needs your 30 votes and `run` finished |
+| 2. Upload | OOD **Files** app (Clusters > Explorer > Files), or `scp` | Put `calls.jsonl` in `$COURSE_DIR/humor-me/data/model_comparison/judge/` (make the folder if it is missing). Upload that one file only |
+| 3. Smoke test | cluster | `mkdir -p logs && LIMIT=3 sbatch explorer/judge_generators.sbatch`, then `cat data/model_comparison/judge/replies.jsonl`: three lines with a `ranking` each, and `logs/humor-judge-<id>.out` showing the time per call. Delete `replies.jsonl` before the full run (or upload the full bundle: finished ids are skipped) |
+| 4. Full run | cluster | `sbatch explorer/judge_generators.sbatch` (about 180 prompts of 12 to 20k tokens; V100, float16, SDPA attention, greedy; `courses-gpu` allows 8 h). Interrupted? Submit the same command again: it skips ids already in `replies.jsonl`. It exits with an error if some calls were not rankings: submit again to retry them (`replies.jsonl.failed.jsonl` shows what the model said) |
+| 5. Download | OOD Files app | Copy `data/model_comparison/judge/replies.jsonl` to the laptop |
+| 6. Score | laptop | `python -m sim.compare_generators judge --import-replies <downloaded file>`, then `score` |
+
+A long few-shot prompt is the risk here: if a call runs out of GPU memory the job splits it, then skips it, and the next run tries it again.
+The `--max-len 30000` default is Qwen2.5's 32k context less room for the reply.
+
+## Exp 24 judge with Ollama (first model to try: qwen3.8:27b)
+
+The same bundle and the same steps as the Qwen2.5-7B judge above, with an Ollama server inside the job. Why: the user picked
+`qwen3.8:27b` from Ollama's local list; it is neither Gemini nor Claude, and a 27B model at 4 bit (about 17 GB) fits a V100 (D-92).
+Qwen2.5-7B stays the fallback.
+
+**Before you rely on it (not verified from here):**
+- The Ollama Linux build must support the **V100 (compute 7.0)** and the cluster driver (**CUDA <= 12.3**). If it cannot start on
+  the GPU the job fails loudly: it checks `ollama ps` shows GPU use (and no CPU offload) before any call, instead of running a 27B
+  model on the CPU for hours.
+- The compute node must reach Ollama's registry for the one-time ~17 GB `ollama pull`. If it cannot, run the pull once from a
+  `courses` CPU job with the same `OLLAMA_MODELS`, then submit the GPU job.
+- **Context:** Ollama truncates a prompt silently to its context window. The job starts the server with `OLLAMA_CONTEXT_LENGTH=32768`,
+  the judge asks for that context in each request, refuses a prompt estimated above it, and treats a reply whose `prompt_eval_count`
+  is under half the estimate as truncated (listed in `replies.jsonl.failed.jsonl`, retried on the next run, never an answer).
+  Each call starts with a unique line so Ollama cannot reuse a cached prefix (otherwise that count would be misleading), which means
+  the examples are re-read every call: expect on the order of a minute per prompt, so a few hours for the 180 calls (an estimate).
+
+| Step | Where | How |
+|---|---|---|
+| 1. Bundle | laptop | `python -m sim.compare_generators judge --judge-provider ollama --export-bundle data/model_comparison/judge-ollama` (smoke: add `--smoke 3`). Needs your 30 votes and `run` finished |
+| 2. Upload | OOD **Files** app | Put `calls.jsonl` in `$COURSE_DIR/humor-me/data/model_comparison/judge-ollama/` (that one file only) |
+| 3. Smoke test | cluster | `mkdir -p logs && LIMIT=3 sbatch explorer/judge_ollama.sbatch`. The first job installs Ollama under `$COURSE_DIR/ollama` (no root) and downloads the model to `$COURSE_DIR/ollama/models`, so it is slow; read `logs/humor-judge-ollama-<id>.out` (it prints `nvidia-smi` and `ollama ps`: the PROCESSOR column must say `100% GPU`) and `data/model_comparison/judge-ollama/replies.jsonl` (three lines, each with a `ranking`) |
+| 4. Full run | cluster | `sbatch explorer/judge_ollama.sbatch` (V100, 8 h max, 12 GB system RAM: the model lives in GPU memory). Interrupted? Submit the same command again: it skips ids already in `replies.jsonl` and the model is already on disk. It exits with an error if calls were not rankings: submit again |
+| 5. Download | OOD Files app | Copy `replies.jsonl` to the laptop |
+| 6. Score | laptop | `python -m sim.compare_generators judge --judge-provider ollama --import-replies <file>`, then `score` |
+
+Other model: `MODEL=<name> sbatch explorer/judge_ollama.sbatch` (and `--judge-model <name>` on the laptop); fallbacks in order are
+muse-glimmer 30b, then the transformers Qwen2.5-7B job above.
+
 ## Storage: what survives where
 
 Each job lands on **whatever node is free**: never assume the same machine twice. Everything that

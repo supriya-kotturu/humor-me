@@ -26,8 +26,8 @@ class FakeModel:
     """A provider: answers with a canned bit, or raises what `fail` says (an exception, or a list used one per call);
     counts attempts and tokens like the real clients."""
 
-    def __init__(self, model, fail=None, tokens=(1000, 2000)):
-        self.model, self.fail, self.tokens = model, fail, tokens
+    def __init__(self, model, fail=None, tokens=(1000, 2000), vary=False):
+        self.model, self.fail, self.tokens, self.vary = model, fail, tokens, vary
         self.attempts = self.input_tokens = self.output_tokens = 0
         self.calls = 0
 
@@ -39,7 +39,7 @@ class FakeModel:
             raise fail
         self.input_tokens += self.tokens[0]
         self.output_tokens += self.tokens[1]
-        return reply(BY_ID[self.model])
+        return reply(BY_ID[self.model] + (f"v{self.calls}" if self.vary else ""))
 
 
 class FakeFilter:
@@ -85,11 +85,14 @@ def rec_of(m, pid):
 
 
 def test_prompts_are_seeded_prefix_stable_balanced_and_distinct():
-    p30 = cg.prompts(30)
-    assert p30 == cg.prompts(30) and cg.prompts(36)[:30] == p30
-    assert {m: sum(p["mode"] == m for p in p30) for m in cg.MODE_ORDER} == {m: 5 for m in cg.MODE_ORDER}
-    assert len({(p["mode"], *p["context"].values()) for p in p30}) == 30
-    assert all(p["context"]["venue"] in cg.VENUES and p["context"]["age"] in cg.AGES for p in p30)
+    p60 = cg.prompts(cg.N_PROMPTS)
+    p30 = cg.prompts(cg.N_BALLOT)
+    assert (cg.N_PROMPTS, cg.N_BALLOT) == (60, 30)
+    assert p60 == cg.prompts(60) and cg.prompts(72)[:60] == p60 and p60[:30] == p30  # the ballot is a prefix
+    for ps, per_mode in ((p30, 5), (p60, 10)):  # both the voted set and the whole set are balanced by mode
+        assert {m: sum(p["mode"] == m for p in ps) for m in cg.MODE_ORDER} == {m: per_mode for m in cg.MODE_ORDER}
+    assert len({(p["mode"], *p["context"].values()) for p in p60}) == 60
+    assert all(p["context"]["venue"] in cg.VENUES and p["context"]["age"] in cg.AGES for p in p60)
 
 
 @pytest.mark.parametrize("attr, value", [("SYSTEM", "x"), ("FILTER_TIMING", (1.0, 2.0)), ("FILTER_RETRIES", 9),
@@ -275,7 +278,7 @@ def stats(**over):
     return base
 
 
-def with_failures(k, n=30):
+def with_failures(k, n=60):
     return {"n_attempts": n, "failure_rate": k / n, "failure_ci95": cg.wilson(k, n)}
 
 
@@ -473,16 +476,18 @@ def test_power_numbers_behind_the_prompt_count():
 
 def test_run_scores_saved_attempts_and_votes_and_stores_numbers_only(data, monkeypatch):
     monkeypatch.setattr(cg.cache, "METRICS", data / "metrics")
-    _, d = prep(n=30)
+    run(n=60)
+    cg.export_ballot(MODELS, 30)
+    d = cg.run_dir()
     key = json.loads(cg.key_path(d).read_text(encoding="utf-8"))
     pref = {"claude-haiku-5-5": 0, "gemini-flash": 1, "gemini-flash-lite": 2}  # this voter: claude, flash, flash-lite
     votes = {pid: "".join(sorted(k["letters"], key=lambda c: pref[k["letters"][c]])) for pid, k in key.items()}
     cg.write_votes(d / "votes.csv", votes)
-    params = cg.current_params(30)
+    params = cg.current_params(60, tuple(MODELS), 30)
     res = cg.cache.run_or_load(cg.METRICS_NAME, cg.run, **params)
-    assert res["n_scored"] == 30 and res["votes"]["mean_rank"]["claude-haiku-5-5"] == 1.0
+    assert (res["n_prompts"], res["n_ballot"], res["n_key"], res["n_scored"]) == (60, 30, 30, 30) and res["votes"]["mean_rank"]["claude-haiku-5-5"] == 1.0
     assert res["n_ranked_last"] == {m: 0 for m in MODELS}
-    assert res["models"]["gemini-flash"]["n_attempts"] == 30
+    assert res["models"]["gemini-flash"]["n_attempts"] == 60 and res["models"]["gemini-flash"]["failure_ci95"][1] < 0.07
     assert res["decision"]["pick"] == "claude-haiku-5-5" and res["decision"]["funniness_clear"] is True
     stored_text = (data / "metrics" / "model_comparison.json").read_text(encoding="utf-8")
     assert "thread " not in stored_text and "line 0" not in stored_text  # no generated text
@@ -491,3 +496,47 @@ def test_run_scores_saved_attempts_and_votes_and_stores_numbers_only(data, monke
     cg.write_votes(d / "votes.csv", {**votes, "p00": "ABC" if votes["p00"] != "ABC" else "CBA"})
     with pytest.raises(AssertionError):  # a changed vote invalidates the call
         cg.run(**params)
+
+
+def test_sixty_prompts_are_generated_and_only_the_first_thirty_reach_the_ballot(data):
+    done, _ = run(n=60)
+    assert done["generated"] == 180
+    out = cg.export_ballot(MODELS, 30)
+    key = json.loads(cg.key_path(cg.run_dir()).read_text(encoding="utf-8"))
+    assert out["in_key"] == 30 and sorted(key) == [p["id"] for p in cg.prompts(30)]
+    assert len(cg.read_votes(cg.run_dir() / "votes.csv")) == 30
+    assert "p30" not in (cg.run_dir() / "ballot.md").read_text(encoding="utf-8")
+
+
+def test_failures_and_latency_are_counted_over_all_sixty_calls_not_just_the_voted_thirty(data):
+    E = llm.LLMError
+    # a model that fails only on prompts 31 to 60 (calls 31..60): the vote never sees it, the gate does
+    bad = {"gemini-flash": FakeModel("gemini-flash-latest", fail=[None] * 30 + [E("refused by the model")] * 4)}
+    run(n=60, models=["gemini-flash"], clients=bad)
+    d = cg.run_dir()
+    attempts = cg.load_attempts(d, ["gemini-flash"], 60)["gemini-flash"]
+    s = cg.call_stats(attempts, cg.MODELS["gemini-flash"])
+    assert (s["n_attempts"], s["n_failed"]) == (60, 4) and s["failure_ci95"] == cg.wilson(4, 60)
+    assert not cg.eligibility({"m": s})["m"]["failure_ok"]
+    assert cg.load_attempts(d, ["gemini-flash"], 30)["gemini-flash"].__len__() == 30  # the voted set alone would not show it
+
+
+def test_what_the_sixty_attempt_failure_bar_rules_out():
+    from math import comb
+
+    def ruled_out(p, n, k_ok):
+        return 1 - sum(comb(n, i) * p ** i * (1 - p) ** (n - i) for i in range(k_ok + 1))
+
+    assert ruled_out(0.03, 60, 3) == pytest.approx(0.106, abs=0.002) and ruled_out(0.03, 30, 0) == pytest.approx(0.599, abs=0.002)
+    assert 1 - ruled_out(0.10, 60, 3) == pytest.approx(0.137, abs=0.002)
+    for k, n in ((3, 60), (4, 60)):
+        assert (cg.wilson(k, n)[1] <= cg.BAR_FAILURE_UPPER) == (k == 3)
+
+
+def test_latency_p95_is_over_all_sixty_calls_nearest_rank():
+    spec = cg.MODELS["gemini-flash"]
+    slow = att(ok=False, latency=12.0, timeout=True, reason="LLMError: transport: ReadTimeout")
+    three = [att(latency=3.0) for _ in range(57)] + [slow] * 3
+    four = [att(latency=3.0) for _ in range(56)] + [slow] * 4
+    assert cg.call_stats(three, spec)["latency_p95_s"] == 3.0  # the 57th of 60 is still a finite call
+    assert cg.call_stats(four, spec)["p95_over_deadline"] and cg.call_stats(four, spec)["latency_p95_s"] is None

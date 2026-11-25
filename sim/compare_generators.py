@@ -4,6 +4,7 @@ Usage (needs keys in backend/.env, see backend/README.md "Comparing generator mo
     python -m sim.compare_generators run --env-file backend/.env            # generate + safety, resumable, paced
     python -m sim.compare_generators export                                  # blind ballot for the user, local only
     python -m sim.compare_generators vote                                    # rank each prompt in the terminal
+    python -m sim.compare_generators judge                                   # a judge calibrated on your votes ranks prompts 31-60
     python -m sim.compare_generators score [--rerun]                         # numbers -> reports/metrics/model_comparison.json
 
 Each prompt is one bit, generated exactly as a show does it (`generate.GeminiGenerator`, one call, 3 threads of 5
@@ -12,12 +13,13 @@ through the OpenAI-compatible endpoint, as in a show). Latency, failures, safety
 are measured; funniness is the user's blind ranking of one safe thread per model per prompt. Generated text, votes and
 the ballot key stay under `data/model_comparison/` (gitignored); only numbers reach `reports/metrics`.
 
-The bar is fixed in docs/plans/live-loop.md (T13) before any run (changed once after review, before any data):
+The bar is fixed in docs/plans/live-loop.md (T13) before any run (changed after review, before any data):
   eligible = p95 latency over ALL calls <= the generator's deadline (a timeout counts as above it) AND the 95% Wilson
-  upper bound of the failure rate over EVERY attempt <= 15%;
+  upper bound of the failure rate over EVERY attempt <= 15%, measured on 60 distinct prompts (30 are voted on);
   among the eligible, the best mean rank wins if the paired 95% CI of (next - best) excludes 0;
   otherwise funniness is called inconclusive and the cheaper (then faster) of the two is picked.
 A model with no safe thread for a prompt is ranked last for it: a show would play the bank there.
+A judge calibrated on the user's votes (sim/judge_generators.py) may add its rankings of prompts 31-60 if it passes its own bar.
 """
 import argparse
 import csv
@@ -44,7 +46,8 @@ from sim.evaluate_safety import wilson  # noqa: E402
 
 DEADLINE_S = generate.GENERATOR_TIMING[1]  # wall time a bit may take over all attempts: what the bridge lines cover
 BAR_FAILURE_UPPER = 0.15  # on the 95% Wilson upper bound of the failure rate, so it needs enough attempts to be met
-N_PROMPTS = 30  # power reasoning in docs/agent/decisions-detail.md D-92
+N_PROMPTS = 60  # generated per model: every one counts toward the failure rate and the latency p95
+N_BALLOT = 30  # the first of them are also voted on; power reasoning in docs/agent/decisions-detail.md D-92
 SEED = 24
 N_BOOT = 10_000
 BITS_PER_5_SHOWS = 40  # 8 bits x 5 shows, the demo's horizon
@@ -459,13 +462,17 @@ def ranks_from_votes(votes: dict[str, str], key: dict, models: list[str]) -> dic
             order = [letters[c] for c in ranking]
         else:
             order = list(letters.values())
-        everyone = order + list(k["last"])
-        if not set(models) <= set(everyone):
-            continue
-        full = {m: float(i) for i, m in enumerate(order, 1)}
-        full.update({m: (len(order) + 1 + len(everyone)) / 2 for m in k["last"]})  # tied for the last places
-        out[pid] = rerank(full, models)
+        full = assemble_ranks({m: float(i) for i, m in enumerate(order, 1)}, k["last"])
+        if set(models) <= set(full):
+            out[pid] = rerank(full, models)
     return out
+
+
+def assemble_ranks(shown: dict[str, float], last: list[str]) -> dict[str, float]:
+    """Ranks for every model of a prompt: the shown ones as given (1..s, or means of such ranks), the models with no
+    safe thread tied for the last places."""
+    n = len(shown) + len(last)
+    return {**shown, **{m: (len(shown) + 1 + n) / 2 for m in last}}
 
 
 def rank_stats(ranks: dict[str, dict[str, float]], models: list[str], n_boot: int = N_BOOT, seed: int = SEED) -> dict:
@@ -581,20 +588,52 @@ def load_attempts(directory: pathlib.Path, models: list[str], n: int) -> dict[st
     return out
 
 
-def votes_digest(directory: pathlib.Path) -> str:
-    """The votes and key, never the text: a changed vote recomputes the experiment."""
-    paths = (key_path(directory), directory / "votes.csv")
+def _digest(paths) -> str:
     body = b"".join(p.read_bytes() for p in paths if p.exists())
     return hashlib.sha256(body.replace(b"\r\n", b"\n")).hexdigest()[:12]
 
 
-def current_params(n: int = N_PROMPTS, models: tuple[str, ...] = tuple(MODELS)) -> dict:
-    return {"gen": gen_digest(), "votes": votes_digest(run_dir()), "n_prompts": n, "models": list(models), "seed": SEED,
+def ballot_digest(directory: pathlib.Path) -> str:
+    """The user's votes and the key, never the text: what the judge was calibrated on."""
+    return _digest((key_path(directory), directory / "votes.csv"))
+
+
+def judge_path(directory: pathlib.Path) -> pathlib.Path:
+    return directory / "judge_result.json"
+
+
+def votes_digest(directory: pathlib.Path) -> str:
+    """The votes, the key and the judge's result: a changed vote or a new judge run recomputes the experiment."""
+    return _digest((key_path(directory), directory / "votes.csv", judge_path(directory)))
+
+
+def judge_ranks(directory: pathlib.Path, models: list[str], n_ballot: int) -> tuple[dict, dict]:
+    """(ranks to add to the user's votes, the judge's summary). The ranks are the judge's for prompts after the
+    ballot, only when its result is current (calibrated on these very votes) and passed its bar; otherwise empty."""
+    jp = judge_path(directory)
+    if not jp.exists():
+        return {}, {"state": "not run"}
+    res = json.loads(jp.read_text(encoding="utf-8"))
+    if res.get("ballot_digest") != ballot_digest(directory) or res.get("n_ballot") != n_ballot:
+        return {}, {"state": "stale", "joined": False, "reason": "the votes changed since the judge ran"}
+    summary = {k: v for k, v in res.items() if k not in ("judge_ranks", "loo")}
+    summary["state"] = "joined" if res["joined"] else "not joined"
+    if not res["joined"]:
+        return {}, summary
+    ids = {p["id"] for p in prompts(N_PROMPTS)[n_ballot:]}
+    ranks = {pid: rerank(r, models) for pid, r in res["judge_ranks"].items() if pid in ids and set(models) <= set(r)}
+    return ranks, summary
+
+
+def current_params(n: int = N_PROMPTS, models: tuple[str, ...] = tuple(MODELS), n_ballot: int = N_BALLOT) -> dict:
+    return {"gen": gen_digest(), "votes": votes_digest(run_dir()), "n_prompts": n, "n_ballot": n_ballot,
+            "models": list(models), "seed": SEED,
             "n_boot": N_BOOT, "deadline_s": DEADLINE_S, "bar_failure_upper": BAR_FAILURE_UPPER,
             "prices": {m: [MODELS[m].price_in, MODELS[m].price_out] for m in models}}
 
 
-def run(gen: str = "", votes: str = "", n_prompts: int = N_PROMPTS, models: list[str] | None = None, seed: int = SEED,
+def run(gen: str = "", votes: str = "", n_prompts: int = N_PROMPTS, n_ballot: int = N_BALLOT,
+        models: list[str] | None = None, seed: int = SEED,
         n_boot: int = N_BOOT, deadline_s: float = DEADLINE_S, bar_failure_upper: float = BAR_FAILURE_UPPER,
         prices: dict | None = None) -> dict:
     """Scores the saved generations and votes. Numbers only: no joke text and no letters leave the data directory."""
@@ -606,13 +645,17 @@ def run(gen: str = "", votes: str = "", n_prompts: int = N_PROMPTS, models: list
     stats = {m: call_stats(attempts[m], MODELS[m]) for m in models}
     kp = key_path(directory)
     key = json.loads(kp.read_text(encoding="utf-8")) if kp.exists() else {}
-    key = {p: k for p, k in key.items() if p in {q["id"] for q in prompts(n_prompts, seed)}}
-    ranks = ranks_from_votes(read_votes(directory / "votes.csv"), key, models)
+    key = {p: k for p, k in key.items() if p in {q["id"] for q in prompts(n_ballot, seed)}}
+    user_ranks = ranks_from_votes(read_votes(directory / "votes.csv"), key, models)
+    extra, judge = judge_ranks(directory, models, n_ballot)  # empty unless the judge agreed with the user
+    ranks = {**user_ranks, **extra}
     by_id = {p["id"]: p for p in prompts(n_prompts, seed)}
-    return {"models": stats, "n_prompts": n_prompts, "n_key": len(key), "n_scored": len(ranks),
+    return {"models": stats, "n_prompts": n_prompts, "n_ballot": n_ballot, "n_key": len(key), "n_scored": len(ranks),
+            "n_user": len(user_ranks), "n_judge": len(extra), "judge": judge,
             "n_ranked_last": {m: sum(m in k["last"] for k in key.values()) for m in models},
-            "votes": rank_stats(ranks, models, n_boot, seed),
-            "per_prompt": [{"prompt": p, "mode": by_id[p]["mode"], "ranks": ranks[p]} for p in sorted(ranks)],
+            "votes": rank_stats(ranks, models, n_boot, seed), "votes_user_only": rank_stats(user_ranks, models, n_boot, seed),
+            "per_prompt": [{"prompt": p, "mode": by_id[p]["mode"], "rater": "user" if p in user_ranks else "judge",
+                            "ranks": ranks[p]} for p in sorted(ranks)],
             "decision": decide(stats, ranks, n_boot, seed, deadline_s, bar_failure_upper)}
 
 
@@ -646,12 +689,14 @@ def verdict(res: dict) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("command", choices=["run", "export", "vote", "score"])
+    ap.add_argument("command", choices=["run", "export", "vote", "judge", "score"])
     ap.add_argument("--env-file")
-    ap.add_argument("--n", type=int, default=N_PROMPTS)
+    ap.add_argument("--n", type=int, default=N_PROMPTS, help="prompts to generate per model (all count toward failures and latency)")
+    ap.add_argument("--ballot", type=int, default=N_BALLOT, help="how many of the first prompts are voted on")
     ap.add_argument("--models", default=",".join(MODELS))
     ap.add_argument("--redo-failed", action="store_true",
                     help="add an attempt where the last one failed for a key, setting or provider-availability reason")
+    ap.add_argument("--judge-model", default=None, help="the judge's model key (default: see sim/judge_generators.py)")
     ap.add_argument("--rerun", action="store_true")
     a = ap.parse_args()
     if a.env_file:
@@ -669,12 +714,15 @@ def main() -> None:
         except ConfigError as e:
             sys.exit(f"stopped, nothing cached for the failing call: {e}")
     elif a.command == "export":
-        print(export_ballot(models, a.n))
+        print(export_ballot(models, a.ballot))
         print(f"ballot: {run_dir() / 'ballot.md'}  votes: {run_dir() / 'votes.csv'}")
+    elif a.command == "judge":
+        from sim import judge_generators
+        judge_generators.main(models, a.n, a.ballot, a.judge_model)
     elif a.command == "vote":
         print(f"{vote_interactively()} votes saved to {run_dir() / 'votes.csv'}")
     else:
-        res = cache.run_or_load(METRICS_NAME, run, rerun=a.rerun, **current_params(a.n, tuple(models)))
+        res = cache.run_or_load(METRICS_NAME, run, rerun=a.rerun, **current_params(a.n, tuple(models), a.ballot))
         print(table(res))
         print(verdict(res))
 

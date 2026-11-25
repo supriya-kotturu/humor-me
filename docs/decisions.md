@@ -95,7 +95,7 @@ What we decided and why, one line each. Click an ID for the full record (options
 | [D-89](agent/decisions-detail.md#d-89) | Nov 24 | Tag the 90k rJokes jokes with the room each suits (venue, energy, age) for Tingyu's judge; upvotes ignore the room, so a gain is not expected. |
 | [D-90](agent/decisions-detail.md#d-90) | Nov 24 | A paused or cut-short show still trains the director and judge from its finished parts; pauses get log rows, and its rating isn't reported. |
 | [D-91](agent/decisions-detail.md#d-91) | Nov 24 | Shows open with the best bits from earlier live shows, so the room never hears 10 s of silence. Teen rooms use only bits from teen shows. Not yet measured. |
-| [D-92](agent/decisions-detail.md#d-92) | Nov 24 | Compare Gemini Flash-Lite, Gemini Flash and Claude Haiku 5.5 for writing bits on 30 prompts with your blind ranking; the bar was fixed before the run: a model must be fast, rarely time out and rarely fail, and a model with no safe thread is ranked last. |
+| [D-92](agent/decisions-detail.md#d-92) | Nov 24 | Compare Gemini Flash-Lite, Gemini Flash and Claude Haiku 5.5 for writing bits on 60 prompts (you vote on the first 30, and a judge taught by your votes may rank the rest if it proves it agrees with you) with your blind ranking; the bar was fixed before the run: a model must be fast, rarely time out and rarely fail, and a model with no safe thread is ranked last. |
 
 New decision: add its full entry to the detailed log with the next ID, then a row here in the same PR.
 A test fails if the two files' IDs don't match.

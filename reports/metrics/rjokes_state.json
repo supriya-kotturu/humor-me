@@ -1,0 +1,9 @@
+{"params": {"export": "data/processed/rjokes/dpo_state.jsonl", "modes": "data/processed/rjokes/modes.jsonl", "state": "data/processed/rjokes/state.jsonl"}, "results": {
+  "n": 89924,
+  "sample": 90000,
+  "left_out": 76,
+  "parse_failures": 31,
+  "fields": {"venue": [["showcase", 85047], ["bar", 4322], ["company_event", 555]], "energy": [["high", 76106], ["normal", 13420], ["low", 398]], "age": [["young_adults", 86256], ["mixed", 3667], ["teens", 1]]},
+  "info_bar": 0.8,
+  "top_share": {"venue": 0.9457653129309195, "energy": 0.8463369067212313, "age": 0.9592099995551799}
+}}

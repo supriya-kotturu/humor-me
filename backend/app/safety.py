@@ -273,6 +273,12 @@ about indirect and euphemistic phrasing that a keyword filter would miss, but do
 Reply with JSON only: {{"verdicts": [{{"id": 0, "ok": true, "reason": "short"}}, ...]}} with exactly one entry per id."""
 TEENS_RULE = "6. The audience is teenagers: also reject any alcohol, drugs, smoking, sexual content, innuendo, crude humor or swearing."
 
+# The reply shape `_parse` accepts, for providers that can enforce it (Claude structured output).
+REPLY_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["verdicts"],
+                "properties": {"verdicts": {"type": "array", "items": {
+                    "type": "object", "additionalProperties": False, "required": ["id", "ok", "reason"],
+                    "properties": {"id": {"type": "integer"}, "ok": {"type": "boolean"}, "reason": {"type": "string"}}}}}}
+
 _client: llm.Client | None = None
 _cache: dict[tuple[str, bool], Verdict] = {}
 
@@ -312,7 +318,11 @@ def prefetch(texts: list[str], age: str, client: llm.Client | None = None) -> No
                 raise llm.LLMError("no client")
             system = SYSTEM.format(teens=TEENS_RULE if age not in STANDARD_AGES else "")
             user = json.dumps([{"id": i, "text": t} for i, t in enumerate(batch)])
-            verdicts = _parse(client.chat(system, user, json_reply=True), len(batch))
+
+            def whole(reply: str) -> None:  # a partial or malformed reply is asked for once more before failing closed
+                if len(_parse(reply, len(batch))) < len(batch):
+                    raise ValueError("missing verdicts")
+            verdicts = _parse(client.chat(system, user, json_reply=REPLY_SCHEMA, validate=whole), len(batch))
             failure = None
         except Exception as exc:  # timeout, 429, malformed JSON, provider block: all mean rejected
             verdicts, failure = {}, f"llm:error:{type(exc).__name__}:{exc}"

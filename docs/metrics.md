@@ -686,6 +686,24 @@ The one miss is an indirect drinking hint at `age: teens`, which the user judged
 **Run history, so the numbers can be trusted.** (1) The first run reported a within-bit p95 of 1.51 s and a between-bit max of 3.74 s: `silences()` dropped a hold whose log timestamp equalled the next play's start (a coarse Windows clock) and counted it as silence (dev-log 2026-11-14). (2) After that fix, between-bit max was 3.36 s (p95 2.58 s): a bit counted as ready when its text was ready, but the first line's render started only then; `_prepare` now waits for the first line's audio. (3) A run on the thread prompt with a joke-major parser was stopped after 80 jokes fell back to the bank, because the model answered with thread-major JSON (dev-log 2026-11-14). (4) The run before this one, after the review changes and the shape fix, met all three bars with a 8.3% mean bank share. (5) This run came after the second review round (voice failures no longer abort, one candidates row per joke, marginal `pick_prob`, shared engine lock, per-chunk deadline, `bridge` rows in the log and dead air read from them); its timing code and the counting of bank jokes both changed, so it was rerun rather than carried over.
 **Caveats:** three shows is a small sample; the sim room has no operator latency and its holds are the config table's; provider load at the time is unknown, and Exp 19's 29% 429/503 rate did not repeat at show pace (2 of about 50 requests here); at most 3 bridge lines play per boundary, and a bit still loading after that would leave dead air, which this sample did not hit. A voice failure on a generated line was not triggered in this run; it is covered by the tests in `tests/test_generate.py`, not by Exp 20.
 
+**Rerun with the new safety budget (2026-11-15, after Exp 22).** Filter 12 s per attempt, 25 s deadline, 3 retries, one re-ask on a bad reply; `MAX_BRIDGES` 5 ([decisions-detail.md D-88](agent/decisions-detail.md#d-88), "The safety check gets a budget sized to a stall"). Same three bars, same command with `--rerun`; the cache key changed with the constants, so this replaces the run above.
+
+| | n | p50 | p95 | max | bar | |
+|---|---|---|---|---|---|---|
+| Within-bit dead air | 96 | 0.001 s | 0.002 s | 0.024 s | p95 at most 1 s | met |
+| Between-bit dead air | 57 | n/a | 0.003 s | 0.007 s | max at most 2 s | met |
+
+Requests 21, 16 and 19 per show (about 93 for 5 shows, peak 4 a minute, against the assumed 500 a day and 15 a minute): met. **Bank share per show: 12.5%, 0% and 0%.** The 12.5% (5 jokes, one bit) was a generator call that failed (`RemoteProtocolError`, wall time 361.7 s, probably a suspended laptop: dev-log 2026-11-15), not the filter. **Filter: 0 calls failed after retries, 6 retried (4 in show 1, 2 in show 3), 0 malformed replies;** the slowest filter call was 5.9 s including its retries. Bridge lines 13, 11 and 12. First line after the start 11.0, 10.5 and 6.5 s (not barred; the first filter call took 5.9 and 5.1 s in shows 1 and 2, a slow cold call). **Caveat:** the provider was mostly healthy, so this shows the longer budget does not hurt the timing, not that stalls are now handled; the stalls and bad replies are covered by synthetic tests (`tests/test_safety.py`), and the real evidence of the failure is still Exp 22's one 75% show.
+
+**Rerun after review (2026-11-24).** Review of #58 changed two things: `MAX_BRIDGES` 5 to 8, because a bit's wait is generation (12 s deadline) plus the filter (25 s), about 37 s, not the filter's 25 s alone; and a partial verdict reply is kept when the re-ask fails, so the lines it judged still pass. The cache key includes `MAX_BRIDGES`, so Exp 20 was rerun; this replaces the run above.
+
+| | n | p95 | max | bar | |
+|---|---|---|---|---|---|
+| Within-bit dead air | 96 | 0.003 s | 0.017 s | p95 at most 1 s | met |
+| Between-bit dead air | 57 | 0.013 s | 0.033 s | max at most 2 s | met |
+
+Requests 16, 23 and 15 per show (90 for 5 shows, peak 4 a minute): met. **Bank share 0%, 0% and 12.5%;** the 12.5% was the joke writer returning malformed JSON for one bit, not the filter. Filter: 0 failed, 3 retried, 0 bad replies, slowest call 5.3 s. First line after the start 12.0, 6.9 and 7.4 s (not barred). Same caveat: a healthy provider, so the new cap was not exercised; `tests/test_generate.py` checks that 8 lines at about 5 s cover the two deadlines.
+
 ## Click alignment (Exp 21, 2026-11-15)
 
 `python -m sim.evaluate_clock check data/sessions/8cdeae59a177.jsonl clicks.json` (notebook Exp 21, task T10). Raw: `reports/metrics/audio_clock.json`, keyed by the session id and a digest of the clicks file; numbers only, the recording and clicks stay outside the repo. One simulated show (`GENERATOR=bank`), laptop speakers and microphone, Audio enhancements off. `play` beeped 35 times (2 kHz, 100 ms, every 10 s); 30 fell inside the recording. Beeps are found with a matched filter for the tone and a threshold of 8x the recording's noise.
@@ -713,3 +731,16 @@ The Stage 0 exit (T11). Three simulated shows back to back, then one live show w
 - **Finding: the third simulated show took 75% of its jokes from the bank.** The generator answered, but the LLM safety check timed out (73 rejected candidates with `llm:error:LLMError:transport: ReadTimeout`, over 5 bits) and one verdict reply was malformed JSON (15 candidates). The filter fails closed, so those bits were rejected whole and the hand-checked bank filled them. The show itself held: no dead air, 21 bridge lines covered the waits. Cost: a show that is three quarters bank yields few Gemini preference pairs. The filter's budget (6 s per attempt, 8 s total) is far below the time a bit has to prepare while the previous one plays (about 40 s); a follow-up PR lengthens it and retries malformed replies, measured on the bank share.
 - Minor: the rules' name check flagged "Morse", "Yelp" and "LEDs" as people (false positives; each costs one candidate).
 - Ratings: simulated shows 4, 2, 2 (the user's taste of a simulated room); live show 3.
+
+## Room labels for the judge's pairs (Exp 25, 2026-11-24)
+
+`python -m explorer.label_state --spread` on Explorer after job 12123581 (Qwen2.5-7B-Instruct, greedy, V100, 8.8 jokes/s, 2.8 h); raw counts in `reports/metrics/rjokes_state.json`, the labeled files stay on the cluster. 89,924 of 90,000 jokes have both a mode and a room label (76 left out: 31 room-label parse failures, 45 earlier mode failures). Check fixed before the run (D-89): a field whose top value covers more than 80% says little.
+
+| Field | Top value | Share | Others |
+|---|---|---|---|
+| venue | showcase | 94.6% | bar 4.8%, company_event 0.6% |
+| energy | high | 84.6% | normal 14.9%, low 0.4% |
+| age | young_adults | 95.9% | mixed 4.1%, teens 1 joke |
+
+**All three fail the check.** The labels are the model's guess, and part of the skew is the prompt (showcase was described as an audience for clever or odd material, which fits most Reddit jokes). Teens = 1 is expected for Reddit's adult material. Chart: `reports/figures/decision-plot/exp25-room-labels.png`.
+

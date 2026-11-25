@@ -119,6 +119,7 @@ def one_show(tts, age: str, seed: int, n_bits: int) -> dict:
             "generator": {"attempts": gen.client.attempts, "retried": gen.client.retried, "failed": gen.client.failed,
                           "seconds": [c["seconds"] for c in gen_calls]},
             "filter": {"attempts": flt.client.attempts, "retried": flt.client.retried, "failed": flt.client.failed,
+                       "bad_replies": flt.client.bad_replies,
                        "seconds": [c["seconds"] for c in safe_calls]},
             "request_starts": [c["start"] for c in gen_calls + safe_calls]}
 
@@ -127,7 +128,7 @@ def digest() -> str:
     """Part of the cache key, so a changed prompt, bridge line or timing constant recomputes the experiment."""
     parts = [generate.PROMPT_ID, generate.SYSTEM, generate.TEENS_RULE, repr(generate.BRIDGES), repr(generate.MODES),
              str((generate.K, generate.JOKES, generate.TEMPERATURE, generate.GENERATOR_TIMING, generate.FILTER_TIMING,
-                  generate.RETRIES, show_module.MAX_BRIDGES, llm.MIN_ATTEMPT_S))]
+                  generate.RETRIES, generate.FILTER_RETRIES, show_module.MAX_BRIDGES, llm.MIN_ATTEMPT_S))]
     return hashlib.sha256(chr(10).join(parts).encode()).hexdigest()[:12]
 
 
@@ -141,7 +142,7 @@ def run(ages: tuple = ("mixed", "teens", "mixed"), n_bits: int = 8, seed: int = 
     """`quota_rpd` and `quota_rpm` are the provider's free-tier requests per day and per minute for this model,
     assumed by whoever runs this; they are inputs, not measured. `model` and `config` only key the cache."""
     assert config in ("", digest()), "prompt, bridge lines or timing constants changed since this call was built"
-    assert model in ("", os.environ.get("LLM_MODEL")), "LLM_MODEL is not the model this call was keyed to"
+    assert model in ("", llm.setting("JOKE_WRITER_MODEL")), "JOKE_WRITER_MODEL is not the model this call was keyed to"
     from app.tts import KokoroTTS, SerialTTS
     tts = SerialTTS(KokoroTTS())
     tts.synthesize("Warm up.")  # the first call loads weights; a real show starts with it warm
@@ -168,7 +169,7 @@ def run(ages: tuple = ("mixed", "teens", "mixed"), n_bits: int = 8, seed: int = 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--env-file", help="a .env holding LLM_BASE_URL, LLM_API_KEY, LLM_MODEL; its values are never printed")
+    ap.add_argument("--env-file", help="a .env holding GEMINI_BASE_URL, GEMINI_API_KEY, JOKE_WRITER_MODEL, SAFETY_CHECK_MODEL (backend/sample.env); its values are never printed")
     ap.add_argument("--quota-rpd", type=int, required=True, help="free-tier requests per day for the model, from its dashboard")
     ap.add_argument("--quota-rpm", type=int, required=True, help="free-tier requests per minute for the model")
     ap.add_argument("--rerun", action="store_true")
@@ -178,7 +179,7 @@ def main() -> None:
         load_dotenv(a.env_file, override=True)
     from sim.cache import run_or_load
     out = run_or_load("live_generator", run, rerun=a.rerun, quota_rpd=a.quota_rpd, quota_rpm=a.quota_rpm,
-                      model=os.environ["LLM_MODEL"], config=digest())
+                      model=llm.setting("JOKE_WRITER_MODEL"), config=digest())
     print({k: v for k, v in out.items() if k != "shows"})
 
 

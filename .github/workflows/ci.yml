@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Python tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      # 3.12: the backend's Kokoro stack doesn't build on 3.14 (dev-log 2026-11-01), and one version keeps root and backend tests together
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            backend/requirements.txt
+      - name: Install
+        # Kokoro pulls in torch (GBs) and no test synthesizes speech, so CI skips it; root pins win on shared packages
+        run: |
+          python -m pip install --upgrade pip
+          grep -v -i '^kokoro' backend/requirements.txt > /tmp/backend-req.txt
+          pip install -r /tmp/backend-req.txt -r requirements.txt
+      - name: Tests
+        run: python -m pytest tests -q
+
+  hygiene:
+    name: Nothing private committed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Show logs, audio, rJokes/transcript text and keys must never reach the repo (CLAUDE.md invariants, data rules)
+      - name: Check tracked files
+        run: |
+          bad=$(git ls-files | grep -E '^data/(sessions|processed|interim|raw)/|\.wav$|(^|/)\.env$|blocklist\.local\.txt$' || true)
+          if [ -n "$bad" ]; then echo "Tracked files that must stay local:"; echo "$bad"; exit 1; fi
+
+  frontend:
+    name: Frontend lint and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build

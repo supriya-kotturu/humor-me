@@ -48,6 +48,10 @@ def main() -> None:
     base = os.getenv("GEMINI_BASE_URL") or os.environ["LLM_BASE_URL"]
     key = os.getenv("GEMINI_API_KEY") or os.getenv("LLM_API_KEY", "")
     model = os.getenv("JOKE_WRITER_MODEL") or os.environ["LLM_MODEL"]
+    if model.startswith("claude") or os.getenv("JOKE_WRITER_PROVIDER") == "anthropic":
+        # This probe speaks the OpenAI-compatible protocol; Claude is not on that endpoint.
+        raise SystemExit(f"{model}: Claude is not reachable through GEMINI_BASE_URL. Probe a Gemini model, e.g. "
+                         "JOKE_WRITER_MODEL=gemini-flash-lite-latest, or time Claude with `sim.compare_generators`.")
 
     ttfts, totals = [], []
     with httpx.Client(timeout=60) as client:

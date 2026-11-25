@@ -89,6 +89,7 @@ The batch run was faster: **5.2 jokes/s, 30k in ~1.6 h, 11 parse failures** (job
 | Monitor / cancel | `squeue -u $USER`, `tail -f logs/humor-label-<id>.out`, `scancel <id>` | |
 | **Interrupted?** (time limit, node failure, `scancel`) | Submit the **same** command again. It skips ids already in `modes.jsonl` (checkpointed every 2,000 jokes) and continues, on whatever node it gets | Same file, grows |
 | **Is the sample big enough?** | Printed at the end of the job (`explorer/mode_precision.py`): per-mode 95% CI of the mean upvote percentile | Table; "extend" hint if any mode is wider than ±0.02 |
+| **Room labels (D-89)** | `mkdir -p logs && sbatch explorer/label_state.sbatch` (smoke test: `python -m explorer.label_state --n 50 --out /tmp/state_smoke.jsonl --dtype half`). Resumable like the mode labels | `data/processed/rjokes/state.jsonl` (ids + venue/energy/age, no text), then `dpo_state.jsonl` (text + mode + room, **cluster only**) |
 | **Extend the sample** | `N=60000 sbatch explorer/label_modes.sbatch` (same seed → labels the *next* 30k of the same shuffle) | Same file, grows |
 
 **Precision rule (fixed before the first run):** label 30k; if any mode's 95% CI half-width on

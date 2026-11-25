@@ -9,13 +9,15 @@ Usage (needs keys in backend/.env, see backend/README.md "Comparing generator mo
 Each prompt is one bit, generated exactly as a show does it (`generate.GeminiGenerator`, one call, 3 threads of 5
 jokes, the production timeout, retries and deadline), then judged by the same safety filter for every model (Flash-Lite
 through the OpenAI-compatible endpoint, as in a show). Latency, failures, safety pass rate, tokens and estimated cost
-are measured; funniness is the user's blind ranking of one safe thread per model per prompt. Generated text and votes
-stay under `data/model_comparison/` (gitignored); only numbers reach `reports/metrics`.
+are measured; funniness is the user's blind ranking of one safe thread per model per prompt. Generated text, votes and
+the ballot key stay under `data/model_comparison/` (gitignored); only numbers reach `reports/metrics`.
 
-The bar is fixed in docs/plans/live-loop.md (Exp 24) before any run:
-  eligible = p95 latency of successful bit generations <= the generator's deadline AND failure rate <= 5%;
+The bar is fixed in docs/plans/live-loop.md (T13) before any run (changed once after review, before any data):
+  eligible = p95 latency over ALL calls <= the generator's deadline (a timeout counts as above it) AND the 95% Wilson
+  upper bound of the failure rate over EVERY attempt <= 15%;
   among the eligible, the best mean rank wins if the paired 95% CI of (next - best) excludes 0;
   otherwise funniness is called inconclusive and the cheaper (then faster) of the two is picked.
+A model with no safe thread for a prompt is ranked last for it: a show would play the bank there.
 """
 import argparse
 import csv
@@ -38,15 +40,17 @@ sys.path.insert(0, str(ROOT / "backend"))
 from app import generate, llm, safety  # noqa: E402
 from sim import cache  # noqa: E402
 from sim.env import AGES, ENERGIES, VENUES  # noqa: E402
+from sim.evaluate_safety import wilson  # noqa: E402
 
 DEADLINE_S = generate.GENERATOR_TIMING[1]  # wall time a bit may take over all attempts: what the bridge lines cover
-BAR_FAILURE = 0.05
-N_PROMPTS = 30  # power reasoning in docs/agent/decisions-detail.md D-88
+BAR_FAILURE_UPPER = 0.15  # on the 95% Wilson upper bound of the failure rate, so it needs enough attempts to be met
+N_PROMPTS = 30  # power reasoning in docs/agent/decisions-detail.md D-90
 SEED = 24
 N_BOOT = 10_000
 BITS_PER_5_SHOWS = 40  # 8 bits x 5 shows, the demo's horizon
 SAFETY_MODEL = "gemini-flash-lite-latest"  # the filter is fixed across candidates: only the generator varies
 METRICS_NAME = "model_comparison"
+SCHEMA_VERSION = "attempts-v2"
 
 
 @dataclass(frozen=True)
@@ -60,9 +64,9 @@ class Spec:
     gap_s: float  # minimum seconds between the end of one request and the start of the next in the bucket
 
 
-# Claude's price is from the user (D-88). The Gemini prices are ASSUMED list prices for the paid tier (the free tier
+# Claude's price is from the user (D-90). The Gemini prices are ASSUMED list prices for the paid tier (the free tier
 # costs $0 and is what a show uses today); `-latest` aliases move, so check them against the key's billing page before
-# reading the cost column. They are part of the cache key of the scored result.
+# reading the cost column. Claude's output tokens include its thinking. All prices are part of the scored result's key.
 MODELS = {
     "gemini-flash-lite": Spec("gemini-flash-lite", "gemini", "gemini-flash-lite-latest", 0.10, 0.40, "gemini-lite", 7.0),
     "gemini-flash": Spec("gemini-flash", "gemini", "gemini-flash-latest", 0.30, 2.50, "gemini-flash", 7.0),
@@ -92,15 +96,22 @@ def prompts(n: int = N_PROMPTS, seed: int = SEED) -> list[dict]:
 
 
 def gen_digest(seed: int = SEED) -> str:
-    """Part of the cache path: editing the generator's prompt or timing starts a fresh comparison, not a mixed one."""
+    """Part of the cache path: editing the generator's or the filter's prompt, timing, retries or model starts a fresh
+    comparison, not a mixed one."""
     parts = [generate.PROMPT_ID, generate.SYSTEM, generate.TEENS_RULE, json.dumps(generate.MODES, sort_keys=True),
              str((generate.K, generate.JOKES, generate.TEMPERATURE, generate.GENERATOR_TIMING, generate.RETRIES)),
-             safety.PROMPT_ID, str(seed)]
+             safety.PROMPT_ID, safety.SYSTEM, str((generate.FILTER_TIMING, generate.FILTER_RETRIES, SAFETY_MODEL)),
+             SCHEMA_VERSION, str(seed)]
     return hashlib.sha256("\x00".join(parts).encode()).hexdigest()[:8]
 
 
 def run_dir(digest: str | None = None, root: pathlib.Path | None = None) -> pathlib.Path:
     return (root or DATA) / f"gen-{digest or gen_digest()}"
+
+
+def key_path(directory: pathlib.Path) -> pathlib.Path:
+    """The ballot key lives apart from the ballot and the votes, so opening the run folder never shows it."""
+    return directory.parent / "key" / f"{directory.name}.json"
 
 
 def read_record(path: pathlib.Path) -> dict | None:
@@ -112,6 +123,13 @@ def write_record(path: pathlib.Path, rec: dict) -> None:
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(rec, ensure_ascii=False), encoding="utf-8")
     tmp.replace(path)  # a Ctrl-C mid-write must not leave a half file that resume would trust
+
+
+def final(rec: dict | None) -> dict | None:
+    """The attempt a bit is judged on: the last successful one, else the last one made."""
+    if not rec or not rec["attempts"]:
+        return None
+    return next((a for a in reversed(rec["attempts"]) if a["ok"]), rec["attempts"][-1])
 
 
 # --- generating --------------------------------------------------------------------------------------------------
@@ -130,16 +148,30 @@ class Pacer:
         self.last[bucket] = self.clock()
 
 
-class CredentialError(RuntimeError):
-    """The run stops instead of caching a pile of failures that only mean a missing or wrong key."""
+class ConfigError(RuntimeError):
+    """The run stops instead of caching a pile of failures that only mean a wrong key, model name or setting."""
 
 
-def _is_auth(e: Exception) -> bool:
-    return isinstance(e, llm.LLMError) and (e.status in (401, 403) or "credentials" in str(e))
+def failure_kind(e: Exception) -> str:
+    """`config`: a key, model name or request the provider will never accept. `infra`: the provider was unavailable or
+    slow, so the same request may work later. `model`: the model answered and the answer was unusable (a refusal, a
+    cut-off, a reply that is not the shape asked for). Only config and infra failures are worth repeating."""
+    if not isinstance(e, (llm.LLMError, generate.GenerationError)):
+        return "config"  # nothing the clients raise is outside these two: it is a bug or a setting
+    if isinstance(e, generate.GenerationError):
+        return "model"
+    if "credentials" in str(e) or (e.status is not None and 400 <= e.status < 500 and not e.retryable):
+        return "config"
+    return "infra" if e.retryable or (e.status is not None and e.status >= 500) else "model"
 
 
-def generate_bit(spec: Spec, prompt: dict, client, pacer: Pacer, now=time.perf_counter) -> dict:
-    """One call as a show makes it. Latency is wall time over all attempts, retries and backoff included."""
+def is_timeout(reason: str | None) -> bool:
+    return bool(reason) and any(w in reason.lower() for w in ("timeout", "deadline"))
+
+
+def generate_bit(spec: Spec, prompt: dict, client, pacer: Pacer, now=time.perf_counter, first: bool = False) -> dict:
+    """One call as a show makes it. Latency is wall time over all attempts, retries and backoff included. On the first
+    call for a model (`first`) a config failure raises `ConfigError` instead of becoming data."""
     pacer.wait(spec.bucket, spec.gap_s)
     gen = generate.GeminiGenerator(client)
     before = (client.attempts, client.input_tokens, client.output_tokens)
@@ -147,78 +179,88 @@ def generate_bit(spec: Spec, prompt: dict, client, pacer: Pacer, now=time.perf_c
     try:
         texts = [gen.generate(prompt["mode"], 0, j, prompt["context"]).texts for j in range(generate.JOKES)]
         threads, failure = [[texts[j][i] for j in range(generate.JOKES)] for i in range(generate.K)], None
-    except Exception as e:  # the generator stores LLMError and GenerationError, and re-raises them per joke
+    except Exception as e:  # the generator stores LLMError and GenerationError and re-raises them per joke
         threads, failure = None, e
     latency = now() - start
     pacer.mark(spec.bucket)
-    if failure is not None and _is_auth(failure):
-        raise CredentialError(f"{spec.key}: {failure}")
-    return {"model": spec.key, "prompt": prompt["id"], "latency_s": latency, "ok": failure is None,
-            "reason": None if failure is None else f"{type(failure).__name__}: {failure}"[:200],
-            "attempts": client.attempts - before[0], "input_tokens": client.input_tokens - before[1],
+    kind = None if failure is None else failure_kind(failure)
+    if first and kind == "config":
+        raise ConfigError(f"{spec.key}: {type(failure).__name__}: {failure}")
+    reason = None if failure is None else f"{type(failure).__name__}: {failure}"[:200]
+    return {"ok": failure is None, "kind": kind, "reason": reason, "latency_s": latency,
+            "timeout": is_timeout(reason) or (failure is not None and latency >= DEADLINE_S - llm.MIN_ATTEMPT_S),
+            "requests": client.attempts - before[0], "input_tokens": client.input_tokens - before[1],
             "output_tokens": client.output_tokens - before[2], "threads": threads, "safety": None, "safety_tries": 0}
 
 
-def judge_bit(rec: dict, prompt: dict, safety_client, pacer: Pacer, now=time.perf_counter) -> dict:
+def judge_bit(att: dict, prompt: dict, safety_client, pacer: Pacer, now=time.perf_counter) -> dict:
     """Run the safety filter over all 15 lines. `safety[i][j]` is [ok, reason] for joke j of thread i. A verdict that
     only says the filter's own call failed is infrastructure, flagged so resume retries it."""
     age = prompt["context"]["age"]
-    flat = [t for thread in rec["threads"] for t in thread]
+    flat = [t for thread in att["threads"] for t in thread]
     pacer.wait(SAFETY_BUCKET, SAFETY_GAP_S)
     start = now()
     safety.prefetch(flat, age, safety_client)
-    rec["safety_latency_s"] = now() - start
+    att["safety_latency_s"] = now() - start
     pacer.mark(SAFETY_BUCKET)
-    verdicts = [[list(safety.check(t, age)) for t in thread] for thread in rec["threads"]]
-    rec["safety"] = verdicts
-    rec["safety_infra_error"] = any(r.startswith("llm:error") for thread in verdicts for ok, r in thread if not ok)
-    rec["safety_tries"] += 1
-    return rec
+    verdicts = [[list(safety.check(t, age)) for t in thread] for thread in att["threads"]]
+    att["safety"] = verdicts
+    att["safety_infra_error"] = any(r.startswith("llm:error") for thread in verdicts for ok, r in thread if not ok)
+    att["safety_tries"] += 1
+    return att
 
 
 MAX_SAFETY_TRIES = 3
 
 
-def needs_safety(rec: dict) -> bool:
-    return rec["ok"] and (rec["safety"] is None or (rec.get("safety_infra_error") and rec["safety_tries"] < MAX_SAFETY_TRIES))
+def needs_safety(att: dict | None) -> bool:
+    return bool(att) and att["ok"] and (att["safety"] is None or (att.get("safety_infra_error")
+                                                                  and att["safety_tries"] < MAX_SAFETY_TRIES))
 
 
 def run_comparison(n: int, models: list[str], make_client: Callable[[Spec], object], safety_client, *,
                    redo_failed: bool = False, directory: pathlib.Path | None = None, pacer: Pacer | None = None,
                    log: Callable[[str], None] = print) -> dict:
-    """Prompt-major, so an interrupted run leaves every model with the same prompts. Returns counts of what was done."""
+    """Prompt-major, so an interrupted run leaves every model with the same prompts. A file per model and prompt holds
+    every attempt made, appended, never overwritten: `redo_failed` adds an attempt where the last one failed for a
+    config or infrastructure reason, and the failure rate counts all of them. Returns counts of what was done."""
     directory, pacer = directory or run_dir(), pacer or Pacer()
     clients = {m: make_client(MODELS[m]) for m in models}
+    first = set(models)  # models whose first call this run has not happened yet
     done = {"generated": 0, "judged": 0, "cached": 0}
     for prompt in prompts(n):
         for m in models:
             path = directory / m / f"{prompt['id']}.json"
-            rec = read_record(path)
-            if rec is not None and not rec["ok"] and redo_failed:
-                rec = None
-            if rec is None:
-                rec = generate_bit(MODELS[m], prompt, clients[m], pacer)
+            rec = read_record(path) or {"model": m, "prompt": prompt["id"], "attempts": []}
+            last = rec["attempts"][-1] if rec["attempts"] else None
+            if last is None or (redo_failed and not last["ok"] and last["kind"] in ("config", "infra")):
+                rec["attempts"].append(generate_bit(MODELS[m], prompt, clients[m], pacer, first=m in first))
+                first.discard(m)
                 done["generated"] += 1
                 write_record(path, rec)
             else:
                 done["cached"] += 1
-            if needs_safety(rec):
-                judge_bit(rec, prompt, safety_client, pacer)
+            att = final(rec)
+            if needs_safety(att):
+                judge_bit(att, prompt, safety_client, pacer)
                 done["judged"] += 1
                 write_record(path, rec)
-            log(f"{prompt['id']} {m}: {'ok' if rec['ok'] else 'FAILED ' + str(rec['reason'])} {rec['latency_s']:.1f}s")
+            log(f"{prompt['id']} {m}: {'ok' if att['ok'] else 'FAILED ' + str(att['reason'])} {att['latency_s']:.1f}s")
     return done
 
 
 def make_client(spec: Spec):
     """The production generator's timing and retries, so latency and failures are what a show would see."""
     timeout, deadline = generate.GENERATOR_TIMING
-    return llm.from_env(timeout, provider=spec.provider, model=spec.model, retries=generate.RETRIES, deadline_s=deadline)
+    return llm.from_env(timeout, role="joke_writer", provider=spec.provider, model=spec.model,
+                        retries=generate.RETRIES, deadline_s=deadline)
 
 
 def make_safety_client():
+    """The production filter's timing and retries (the filter is Gemini for every candidate, as in a show)."""
     timeout, deadline = generate.FILTER_TIMING
-    return llm.from_env(timeout, provider="gemini", role="safety_check", model=SAFETY_MODEL, retries=generate.RETRIES, deadline_s=deadline)
+    return llm.from_env(timeout, role="safety_check", provider="gemini", model=SAFETY_MODEL,
+                        retries=generate.FILTER_RETRIES, deadline_s=deadline)
 
 
 # --- blind ballot ------------------------------------------------------------------------------------------------
@@ -229,9 +271,10 @@ LETTERS = "ABC"
 def playable_thread(rec: dict | None) -> int | None:
     """The first thread whose five lines all passed the filter, with the filter's own calls not failing: the thread a
     show would play unchanged. None when the model has no such thread for this prompt."""
-    if not rec or not rec["ok"] or rec["safety"] is None or rec.get("safety_infra_error"):
+    att = final(rec)
+    if not att or not att["ok"] or att["safety"] is None or att.get("safety_infra_error"):
         return None
-    return next((i for i, thread in enumerate(rec["safety"]) if all(ok for ok, _ in thread)), None)
+    return next((i for i, thread in enumerate(att["safety"]) if all(ok for ok, _ in thread)), None)
 
 
 def read_votes(path: pathlib.Path) -> dict[str, str]:
@@ -249,44 +292,52 @@ def write_votes(path: pathlib.Path, votes: dict[str, str]) -> None:
 
 
 def export_ballot(models: list[str], n: int, directory: pathlib.Path | None = None, seed: int = SEED) -> dict:
-    """Writes ballot.md, key.json and votes.csv under the run directory. Incremental: prompts already in the key keep
-    their letters and votes, so raising `n` later only adds. Prompts where any model lacks a playable thread are
-    dropped and listed, since a vote needs all of them."""
+    """Writes ballot.md and votes.csv under the run directory and the key apart from them. A model with no playable
+    thread for a prompt is not shown and is ranked last for it (a show would play the bank), so no prompt is dropped;
+    a prompt with fewer than two models shown needs no vote. Incremental: prompts already in the key keep their
+    letters and votes. A prompt not yet generated for every model waits (`pending`): export after `run` finishes."""
     directory = directory or run_dir()
     directory.mkdir(parents=True, exist_ok=True)
-    key_path, votes_path = directory / "key.json", directory / "votes.csv"
-    key = json.loads(key_path.read_text(encoding="utf-8")) if key_path.exists() else {}
-    votes, dropped = read_votes(votes_path), {}
-    by_id = {p["id"]: p for p in prompts(n, seed)}
-    for pid, prompt in by_id.items():
+    kp, votes_path = key_path(directory), directory / "votes.csv"
+    key = json.loads(kp.read_text(encoding="utf-8")) if kp.exists() else {}
+    votes, pending = read_votes(votes_path), []
+    by_id = {p["id"]: p for p in prompts(max([n] + [int(k[1:]) + 1 for k in key]), seed)}
+    for pid in prompts(n, seed):
+        pid = pid["id"]
         if pid in key:
             continue
-        picks = {m: playable_thread(read_record(directory / m / f"{pid}.json")) for m in models}
-        if any(p is None for p in picks.values()):
-            dropped[pid] = [m for m, p in picks.items() if p is None]
+        recs = {m: read_record(directory / m / f"{pid}.json") for m in models}
+        if any(r is None or not r["attempts"] for r in recs.values()):
+            pending.append(pid)
             continue
-        order = list(models)
-        random.Random(f"{seed}:ballot:{pid}").shuffle(order)
-        key[pid] = {"letters": dict(zip(LETTERS, order)), "threads": picks}
-        votes.setdefault(pid, "")
+        picks = {m: playable_thread(recs[m]) for m in models}
+        shown = [m for m in models if picks[m] is not None]
+        random.Random(f"{seed}:ballot:{pid}").shuffle(shown)
+        key[pid] = {"letters": dict(zip(LETTERS, shown)), "threads": {m: picks[m] for m in shown},
+                    "last": [m for m in models if picks[m] is None]}
+        if len(shown) >= 2:
+            votes.setdefault(pid, "")
     lines = ["# Blind ballot: rank the options for each setting, funniest first (e.g. BAC)\n"]
     for pid in sorted(key):
+        if len(key[pid]["letters"]) < 2:
+            continue
         ctx = by_id[pid]["context"]
         lines.append(f"\n## {pid}: {ctx['venue']}, {ctx['energy']} energy, {ctx['age']} audience\n")
-        for letter in LETTERS:
-            m = key[pid]["letters"][letter]
-            thread = read_record(directory / m / f"{pid}.json")["threads"][key[pid]["threads"][m]]
+        for letter, m in key[pid]["letters"].items():
+            thread = final(read_record(directory / m / f"{pid}.json"))["threads"][key[pid]["threads"][m]]
             lines.append(f"\n**{letter}**\n" + "\n".join(f"{j + 1}. {t}" for j, t in enumerate(thread)) + "\n")
-    key_path.write_text(json.dumps(key, indent=1, sort_keys=True), encoding="utf-8")
+    kp.parent.mkdir(parents=True, exist_ok=True)
+    kp.write_text(json.dumps(key, indent=1, sort_keys=True), encoding="utf-8")
     (directory / "ballot.md").write_text("".join(lines), encoding="utf-8")
     write_votes(votes_path, votes)
-    return {"in_ballot": len(key), "dropped": dropped}
+    return {"in_key": len(key), "to_vote": len(votes), "ranked_last": {p: k["last"] for p, k in sorted(key.items()) if k["last"]},
+            "pending": pending}
 
 
-def parse_ranking(text: str) -> str | None:
-    """'bac' -> 'BAC' when it names each letter once; anything else is None."""
+def parse_ranking(text: str, letters: str = LETTERS) -> str | None:
+    """'bac' -> 'BAC' when it names each of `letters` once; anything else is None."""
     s = "".join(c for c in text.upper() if c.isalpha())
-    return s if sorted(s) == sorted(LETTERS) else None
+    return s if sorted(s) == sorted(letters) else None
 
 
 def vote_interactively(directory: pathlib.Path | None = None, read=input, out=print) -> int:
@@ -298,20 +349,22 @@ def vote_interactively(directory: pathlib.Path | None = None, read=input, out=pr
             current = line[3:].split(":")[0]
         if current:
             blocks[current] = blocks.get(current, "") + line
+    key = json.loads(key_path(directory).read_text(encoding="utf-8"))
     votes_path, count = directory / "votes.csv", 0
     votes = read_votes(votes_path)
-    todo = [p for p, r in sorted(votes.items()) if not parse_ranking(r)]
+    todo = [p for p, r in sorted(votes.items()) if not parse_ranking(r, "".join(key[p]["letters"]))]
     for i, pid in enumerate(todo, 1):
+        letters = "".join(key[pid]["letters"])
         out(f"\n[{i}/{len(todo)}]\n{blocks[pid]}")
         while True:
-            answer = read("ranking, best first (e.g. BAC), s to skip, q to quit: ").strip().lower()
-            if answer in ("s", "q") or parse_ranking(answer):
+            answer = read(f"ranking of {letters}, best first (e.g. {letters[::-1]}), s to skip, q to quit: ").strip().lower()
+            if answer in ("s", "q") or parse_ranking(answer, letters):
                 break
-            out("use each of A, B, C once")
+            out(f"use each of {', '.join(letters)} once")
         if answer == "q":
             break
         if answer != "s":
-            votes[pid] = parse_ranking(answer)
+            votes[pid] = parse_ranking(answer, letters)
             write_votes(votes_path, votes)
             count += 1
     return count
@@ -320,33 +373,46 @@ def vote_interactively(directory: pathlib.Path | None = None, read=input, out=pr
 # --- scoring -----------------------------------------------------------------------------------------------------
 
 def percentile(xs: list[float], q: float) -> float | None:
-    return float(np.percentile(xs, q)) if xs else None
+    """Nearest-rank percentile: the ceil(q/100 x n)-th smallest value. It accepts `inf` (a timeout is above any deadline)
+    without interpolating into it, so the p95 is infinite exactly when more than 5% of the calls are."""
+    xs = sorted(xs)
+    return xs[max(math.ceil(q / 100 * len(xs)), 1) - 1] if xs else None
 
 
-def call_stats(records: list[dict], spec: Spec) -> dict:
-    """Per-model numbers from its saved calls. Latency is over successful calls (a failure is counted as a failure, not
-    also as a slow success). Cost covers every call's tokens, failed ones included, since a provider bills them."""
-    ok = [r for r in records if r["ok"]]
-    judged = [r for r in ok if r["safety"] is not None and not r.get("safety_infra_error")]
-    lines = [v for r in judged for thread in r["safety"] for v in thread]
-    threads = [t for r in judged for t in r["safety"]]
-    tin, tout = sum(r["input_tokens"] for r in records), sum(r["output_tokens"] for r in records)
+def call_latency(a: dict) -> float:
+    """What a call counts as in the latency bar: its wall time, or infinity when it timed out or used the deadline up."""
+    return math.inf if a["timeout"] else a["latency_s"]
+
+
+def call_stats(attempts: list[dict], spec: Spec) -> dict:
+    """Per-model numbers from every attempt made (a retried failure stays in). Latency is over ALL attempts, a timeout
+    counting as above the deadline. Cost covers every attempt's tokens, since a provider bills failed ones too."""
+    ok = [a for a in attempts if a["ok"]]
+    judged = [a for a in ok if a["safety"] is not None and not a.get("safety_infra_error")]
+    lines = [v for a in judged for thread in a["safety"] for v in thread]
+    threads = [t for a in judged for t in a["safety"]]
+    tin, tout = sum(a["input_tokens"] for a in attempts), sum(a["output_tokens"] for a in attempts)
     cost = (tin * spec.price_in + tout * spec.price_out) / 1e6
-    n = len(records)
+    n, k = len(attempts), len(attempts) - len(ok)
     reasons: dict[str, int] = {}
-    for r in records:
-        if not r["ok"]:
-            reasons[r["reason"][:60]] = reasons.get(r["reason"][:60], 0) + 1
-    return {"model": spec.model, "n_calls": n, "n_failed": n - len(ok), "failure_rate": (n - len(ok)) / n if n else None,
-            "failure_reasons": reasons, "latency_p50_s": percentile([r["latency_s"] for r in ok], 50),
-            "latency_p95_s": percentile([r["latency_s"] for r in ok], 95),
-            "latency_max_s": max((r["latency_s"] for r in ok), default=None),
-            "attempts_per_call": sum(r["attempts"] for r in records) / n if n else None,
+    for a in attempts:
+        if not a["ok"]:
+            reasons[a["reason"][:60]] = reasons.get(a["reason"][:60], 0) + 1
+    lat = [call_latency(a) for a in attempts]
+    p50, p95 = percentile(lat, 50), percentile(lat, 95)
+    return {"model": spec.model, "n_attempts": n, "n_failed": k, "failure_rate": k / n if n else None,
+            "failure_ci95": wilson(k, n), "failure_reasons": reasons,
+            "n_timeouts": sum(a["timeout"] for a in attempts),
+            "latency_p50_s": None if p50 in (None, math.inf) else p50,
+            "latency_p95_s": None if p95 in (None, math.inf) else p95,
+            "p95_over_deadline": p95 == math.inf,
+            "latency_max_ok_s": max((a["latency_s"] for a in ok), default=None),
+            "requests_per_attempt": sum(a["requests"] for a in attempts) / n if n else None,
             "n_judged": len(judged), "line_pass_rate": sum(v[0] for v in lines) / len(lines) if lines else None,
             "thread_pass_rate": sum(all(v[0] for v in t) for t in threads) / len(threads) if threads else None,
-            "playable_rate": (sum(any(all(v[0] for v in t) for t in r["safety"]) for r in judged) / len(judged)
+            "playable_rate": (sum(any(all(v[0] for v in t) for t in a["safety"]) for a in judged) / len(judged)
                               if judged else None),
-            "input_tokens_per_call": tin / n if n else None, "output_tokens_per_call": tout / n if n else None,
+            "input_tokens_per_attempt": tin / n if n else None, "output_tokens_per_attempt": tout / n if n else None,
             "price_per_mtok": [spec.price_in, spec.price_out],
             "cost_per_bit_usd": cost / n if n else None,
             "cost_5_shows_usd": cost / n * BITS_PER_5_SHOWS if n else None}
@@ -362,24 +428,48 @@ def boot_ci(x: np.ndarray, idx: np.ndarray) -> list[float]:
     return [float(np.percentile(means, 2.5)), float(np.percentile(means, 97.5))]
 
 
-def ranks_from_votes(votes: dict[str, str], key: dict, models: list[str]) -> dict[str, dict[str, int]]:
-    """{prompt: {model: rank}} (1 = funniest) for prompts with a valid ranking and a key."""
-    out = {}
-    for pid, ranking in votes.items():
-        if pid in key and parse_ranking(ranking):
-            letters = key[pid]["letters"]
-            r = {letters[c]: i for i, c in enumerate(parse_ranking(ranking), 1) if letters[c] in models}
-            if len(r) == len(models):
-                out[pid] = r
+def rerank(r: dict[str, float], keep: list[str]) -> dict[str, float]:
+    """Ranks among the models in `keep`, order preserved; equal ranks share their average place."""
+    out, order, i = {}, sorted(keep, key=lambda m: r[m]), 0
+    while i < len(order):
+        j = i
+        while j + 1 < len(order) and r[order[j + 1]] == r[order[i]]:
+            j += 1
+        for m in order[i:j + 1]:
+            out[m] = (i + j) / 2 + 1
+        i = j + 1
     return out
 
 
-def restrict(ranks: dict[str, dict[str, int]], keep: list[str]) -> dict[str, dict[str, int]]:
-    """Re-rank each prompt among the models in `keep`, order preserved."""
-    return {pid: {m: i for i, m in enumerate(sorted(keep, key=lambda m: r[m]), 1)} for pid, r in ranks.items()}
+def restrict(ranks: dict[str, dict[str, float]], keep: list[str]) -> dict[str, dict[str, float]]:
+    return {pid: rerank(r, keep) for pid, r in ranks.items()}
 
 
-def rank_stats(ranks: dict[str, dict[str, int]], models: list[str], n_boot: int = N_BOOT, seed: int = SEED) -> dict:
+def ranks_from_votes(votes: dict[str, str], key: dict, models: list[str]) -> dict[str, dict[str, float]]:
+    """{prompt: {model: rank}} (1 = funniest), over the prompts the key covers, for `models` only. The models shown are
+    ranked by the vote (a prompt with one shown model needs none); models with no safe thread share the last places.
+    A prompt whose vote is missing or invalid is left out, and so is one that lacks a requested model."""
+    out = {}
+    for pid, k in key.items():
+        letters = k["letters"]
+        if len(letters) >= 2:
+            ranking = parse_ranking(votes.get(pid, ""), "".join(letters))
+            if not ranking:
+                continue
+            order = [letters[c] for c in ranking]
+        else:
+            order = list(letters.values())
+        everyone = order + list(k["last"])
+        if not set(models) <= set(everyone):
+            continue
+        full = {m: float(i) for i, m in enumerate(order, 1)}
+        full.update({m: (len(order) + 1 + len(everyone)) / 2 for m in k["last"]})  # tied for the last places
+        out[pid] = rerank(full, models)
+    return out
+
+
+def rank_stats(ranks: dict[str, dict[str, float]], models: list[str], n_boot: int = N_BOOT, seed: int = SEED) -> dict:
+    ranks = restrict(ranks, models)
     pids = sorted(ranks)
     if not pids:
         return {"n": 0, "mean_rank": {}, "ci95": {}, "diff": {}}
@@ -391,27 +481,30 @@ def rank_stats(ranks: dict[str, dict[str, int]], models: list[str], n_boot: int 
                      for a in models for b in models if a < b}}
 
 
-def diff_ci(ranks: dict[str, dict[str, int]], worse: str, better: str, n_boot: int = N_BOOT, seed: int = SEED):
+def diff_ci(ranks: dict[str, dict[str, float]], worse: str, better: str, n_boot: int = N_BOOT, seed: int = SEED):
     """Paired bootstrap over prompts of mean(rank worse - rank better): positive means `better` is funnier."""
     pids = sorted(ranks)
     d = np.array([ranks[p][worse] - ranks[p][better] for p in pids], float)
     return float(d.mean()), boot_ci(d, boot_idx(len(pids), n_boot, seed))
 
 
-def eligibility(stats: dict, deadline_s: float = DEADLINE_S, bar_failure: float = BAR_FAILURE) -> dict[str, dict]:
-    """Per model: the two bar terms and whether both hold. A model with no successful call is not eligible."""
+def eligibility(stats: dict, deadline_s: float = DEADLINE_S, bar_upper: float = BAR_FAILURE_UPPER) -> dict[str, dict]:
+    """Per model: the two bar terms and whether both hold. Latency: p95 over all calls at most the deadline, a timeout
+    counting as above it. Failures: the 95% Wilson upper bound over every attempt at most `bar_upper`. A model with no
+    attempt is not eligible."""
     out = {}
     for m, s in stats.items():
-        p95, fr = s["latency_p95_s"], s["failure_rate"]
-        out[m] = {"latency_ok": p95 is not None and p95 <= deadline_s, "failure_ok": fr is not None and fr <= bar_failure}
+        p95, ci = s["latency_p95_s"], s.get("failure_ci95")
+        out[m] = {"latency_ok": not s.get("p95_over_deadline", False) and p95 is not None and p95 <= deadline_s,
+                  "failure_ok": ci is not None and ci[1] <= bar_upper}
         out[m]["eligible"] = out[m]["latency_ok"] and out[m]["failure_ok"]
     return out
 
 
-def decide(stats: dict, ranks: dict[str, dict[str, int]], n_boot: int = N_BOOT, seed: int = SEED,
-           deadline_s: float = DEADLINE_S, bar_failure: float = BAR_FAILURE) -> dict:
+def decide(stats: dict, ranks: dict[str, dict[str, float]], n_boot: int = N_BOOT, seed: int = SEED,
+           deadline_s: float = DEADLINE_S, bar_upper: float = BAR_FAILURE_UPPER) -> dict:
     """The pre-fixed bar. Ranks are redone among the eligible models before comparing them."""
-    elig = eligibility(stats, deadline_s, bar_failure)
+    elig = eligibility(stats, deadline_s, bar_upper)
     ok = sorted(m for m, e in elig.items() if e["eligible"])
     out = {"eligibility": elig, "eligible": ok, "pick": None, "best": None, "second": None, "funniness_clear": None,
            "diff": None, "reason": ""}
@@ -433,7 +526,7 @@ def decide(stats: dict, ranks: dict[str, dict[str, int]], n_boot: int = N_BOOT, 
     if clear:
         out.update(pick=best, reason=f"{best} is funnier than {second}: the paired CI of the rank gap excludes 0")
     else:
-        cheaper = min((best, second), key=lambda m: (stats[m]["cost_per_bit_usd"], stats[m]["latency_p50_s"], m))
+        cheaper = min((best, second), key=lambda m: (stats[m]["cost_per_bit_usd"], stats[m]["latency_p50_s"] or 0, m))
         out.update(pick=cheaper, reason=f"funniness is inconclusive between {best} and {second} (the paired CI "
                                         "includes 0), so the cheaper, then faster, of the two")
     return out
@@ -442,6 +535,7 @@ def decide(stats: dict, ranks: dict[str, dict[str, int]], n_boot: int = N_BOOT, 
 # --- power -------------------------------------------------------------------------------------------------------
 
 RANK_SD_NO_SIGNAL = math.sqrt(2 / 3)  # sd of one model's rank among 3 when every order is equally likely
+RANK_GAP_SD_NO_SIGNAL = math.sqrt(2.0)  # sd of the gap between two models' ranks in that case
 
 
 def halfwidth(n: int, sd: float = RANK_SD_NO_SIGNAL) -> float:
@@ -449,62 +543,77 @@ def halfwidth(n: int, sd: float = RANK_SD_NO_SIGNAL) -> float:
     return 1.96 * sd / math.sqrt(n)
 
 
-def simulate_gap_power(n: int, gap: float, reps: int = 4000, seed: int = SEED) -> float:
-    """P(the paired 95% interval of (next - best) excludes 0) when the best model sits `gap` latent sd above the other
-    two (Thurstone: score = mean + N(0, 1) per model per prompt; a t interval stands in for the bootstrap)."""
-    rng = np.random.default_rng(seed)
+def gap_halfwidth(n: int) -> float:
+    """Half-width of the interval for the gap between two models' mean ranks: the one the decision turns on."""
+    return halfwidth(n, RANK_GAP_SD_NO_SIGNAL)
+
+
+def simulate_ranks(n: int, gap: float, rng: np.random.Generator, models: list[str]) -> dict[str, dict[str, float]]:
+    """Votes from a voter for whom `models[0]` is `gap` latent sd funnier than the other two (Thurstone: score = mean
+    + N(0, 1) per model per prompt)."""
     mu = np.array([gap, 0.0, 0.0])
-    hits = 0
-    for _ in range(reps):
-        ranks = np.argsort(np.argsort(-(mu + rng.standard_normal((n, 3))), axis=1), axis=1) + 1
-        d = ranks[:, 1] - ranks[:, 0]  # second model minus best
-        hits += d.mean() - 1.96 * d.std(ddof=1) / math.sqrt(n) > 0
-    return hits / reps
+    ranks = np.argsort(np.argsort(-(mu + rng.standard_normal((n, 3))), axis=1), axis=1) + 1
+    return {f"p{i:02d}": {m: float(ranks[i, j]) for j, m in enumerate(models)} for i in range(n)}
 
 
-def expected_rank_gap(gap: float, reps: int = 200_000, seed: int = SEED) -> float:
-    """Mean rank of a model at the others' level minus the best's, under the same model."""
+def simulate_decision_power(n: int, gap: float, reps: int = 300, n_boot: int = 1000, seed: int = SEED) -> float:
+    """How often the real `decide()` calls the truly funnier model clearly funnier: all three models eligible, the best
+    and second picked by their observed mean ranks, the gap interval a paired bootstrap over prompts."""
     rng = np.random.default_rng(seed)
-    ranks = np.argsort(np.argsort(-(np.array([gap, 0.0, 0.0]) + rng.standard_normal((reps, 3))), axis=1), axis=1) + 1
-    return float(ranks[:, 1].mean() - ranks[:, 0].mean())
+    models = list(MODELS)
+    stats = {m: {"latency_p95_s": 5.0, "failure_ci95": [0.0, 0.05], "failure_rate": 0.0, "n_attempts": n,
+                 "cost_per_bit_usd": 0.001, "latency_p50_s": 2.0} for m in models}
+    hits = 0
+    for r in range(reps):
+        d = decide(stats, simulate_ranks(n, gap, rng, models), n_boot=n_boot, seed=seed + r)
+        hits += bool(d["funniness_clear"]) and d["pick"] == models[0]
+    return hits / reps
 
 
 # --- the experiment ----------------------------------------------------------------------------------------------
 
-def load_records(directory: pathlib.Path, models: list[str], n: int) -> dict[str, list[dict]]:
-    return {m: [r for p in prompts(n) if (r := read_record(directory / m / f"{p['id']}.json"))] for m in models}
+def load_attempts(directory: pathlib.Path, models: list[str], n: int) -> dict[str, list[dict]]:
+    """Every attempt made for each model over the first `n` prompts."""
+    out = {}
+    for m in models:
+        recs = [read_record(directory / m / f"{p['id']}.json") for p in prompts(n)]
+        out[m] = [a for r in recs if r for a in r["attempts"]]
+    return out
 
 
 def votes_digest(directory: pathlib.Path) -> str:
     """The votes and key, never the text: a changed vote recomputes the experiment."""
-    body = b"".join((directory / name).read_bytes() for name in ("key.json", "votes.csv") if (directory / name).exists())
+    paths = (key_path(directory), directory / "votes.csv")
+    body = b"".join(p.read_bytes() for p in paths if p.exists())
     return hashlib.sha256(body.replace(b"\r\n", b"\n")).hexdigest()[:12]
 
 
 def current_params(n: int = N_PROMPTS, models: tuple[str, ...] = tuple(MODELS)) -> dict:
     return {"gen": gen_digest(), "votes": votes_digest(run_dir()), "n_prompts": n, "models": list(models), "seed": SEED,
-            "n_boot": N_BOOT, "deadline_s": DEADLINE_S, "bar_failure": BAR_FAILURE,
+            "n_boot": N_BOOT, "deadline_s": DEADLINE_S, "bar_failure_upper": BAR_FAILURE_UPPER,
             "prices": {m: [MODELS[m].price_in, MODELS[m].price_out] for m in models}}
 
 
 def run(gen: str = "", votes: str = "", n_prompts: int = N_PROMPTS, models: list[str] | None = None, seed: int = SEED,
-        n_boot: int = N_BOOT, deadline_s: float = DEADLINE_S, bar_failure: float = BAR_FAILURE,
+        n_boot: int = N_BOOT, deadline_s: float = DEADLINE_S, bar_failure_upper: float = BAR_FAILURE_UPPER,
         prices: dict | None = None) -> dict:
     """Scores the saved generations and votes. Numbers only: no joke text and no letters leave the data directory."""
     models = models or list(MODELS)
-    assert gen == gen_digest(seed), "the generator prompt or timing changed since these calls were made"
+    assert gen == gen_digest(seed), "the generator or filter prompt, model or timing changed since these calls were made"
     directory = run_dir(gen)
     assert votes == votes_digest(directory), "votes or key changed since this call was built"
-    records = load_records(directory, models, n_prompts)
-    stats = {m: call_stats(records[m], MODELS[m]) for m in models}
-    key_path = directory / "key.json"
-    key = json.loads(key_path.read_text(encoding="utf-8")) if key_path.exists() else {}
+    attempts = load_attempts(directory, models, n_prompts)
+    stats = {m: call_stats(attempts[m], MODELS[m]) for m in models}
+    kp = key_path(directory)
+    key = json.loads(kp.read_text(encoding="utf-8")) if kp.exists() else {}
+    key = {p: k for p, k in key.items() if p in {q["id"] for q in prompts(n_prompts, seed)}}
     ranks = ranks_from_votes(read_votes(directory / "votes.csv"), key, models)
     by_id = {p["id"]: p for p in prompts(n_prompts, seed)}
-    return {"models": stats, "n_prompts": n_prompts, "n_ballot": len(key), "n_voted": len(ranks),
+    return {"models": stats, "n_prompts": n_prompts, "n_key": len(key), "n_scored": len(ranks),
+            "n_ranked_last": {m: sum(m in k["last"] for k in key.values()) for m in models},
             "votes": rank_stats(ranks, models, n_boot, seed),
             "per_prompt": [{"prompt": p, "mode": by_id[p]["mode"], "ranks": ranks[p]} for p in sorted(ranks)],
-            "decision": decide(stats, ranks, n_boot, seed, deadline_s, bar_failure)}
+            "decision": decide(stats, ranks, n_boot, seed, deadline_s, bar_failure_upper)}
 
 
 def stored() -> dict | None:
@@ -517,13 +626,14 @@ def fmt(x, spec="{:.2f}", none="-"):
 
 
 def table(res: dict) -> str:
-    rows = ["| Model | Calls | Failed | p50 | p95 | Line pass | Playable | Mean rank (95% CI) | Cost, 5 shows | Eligible |",
+    rows = ["| Model | Attempts | Failed (95% upper) | p50 | p95 | Line pass | Playable | Mean rank (95% CI) | Cost, 5 shows | Eligible |",
             "|---|---|---|---|---|---|---|---|---|---|"]
     mean, ci = res["votes"].get("mean_rank", {}), res["votes"].get("ci95", {})
     for m, s in res["models"].items():
         rank = f"{mean[m]:.2f} ({ci[m][0]:.2f} to {ci[m][1]:.2f})" if m in mean else "-"
-        rows.append(f"| {m} | {s['n_calls']} | {s['n_failed']} | {fmt(s['latency_p50_s'], '{:.1f} s')} | "
-                    f"{fmt(s['latency_p95_s'], '{:.1f} s')} | {fmt(s['line_pass_rate'], '{:.0%}')} | "
+        p95 = "over deadline" if s["p95_over_deadline"] else fmt(s["latency_p95_s"], "{:.1f} s")
+        rows.append(f"| {m} | {s['n_attempts']} | {s['n_failed']} ({s['failure_ci95'][1]:.0%}) | "
+                    f"{fmt(s['latency_p50_s'], '{:.1f} s')} | {p95} | {fmt(s['line_pass_rate'], '{:.0%}')} | "
                     f"{fmt(s['playable_rate'], '{:.0%}')} | {rank} | {fmt(s['cost_5_shows_usd'], '${:.3f}')} | "
                     f"{'yes' if res['decision']['eligibility'][m]['eligible'] else 'no'} |")
     return "\n".join(rows)
@@ -540,7 +650,8 @@ def main() -> None:
     ap.add_argument("--env-file")
     ap.add_argument("--n", type=int, default=N_PROMPTS)
     ap.add_argument("--models", default=",".join(MODELS))
-    ap.add_argument("--redo-failed", action="store_true", help="drop cached failed calls and call again")
+    ap.add_argument("--redo-failed", action="store_true",
+                    help="add an attempt where the last one failed for a key, setting or provider-availability reason")
     ap.add_argument("--rerun", action="store_true")
     a = ap.parse_args()
     if a.env_file:
@@ -555,7 +666,7 @@ def main() -> None:
             sys.exit("ANTHROPIC_API_KEY is not set: add a paid key to backend/.env (or pass --models without it)")
         try:
             print(run_comparison(a.n, models, make_client, make_safety_client(), redo_failed=a.redo_failed))
-        except CredentialError as e:
+        except ConfigError as e:
             sys.exit(f"stopped, nothing cached for the failing call: {e}")
     elif a.command == "export":
         print(export_ballot(models, a.n))

@@ -43,7 +43,7 @@ def get_tts():
 
 
 def make_stack(room: str):
-    """(generator, safety, fallback, bridge lines). `GENERATOR=llm` brings the real model and filter; otherwise the
+    """(generator, safety, fallback, bridge lines). `JOKE_SOURCE=llm` brings the real model and filter; otherwise the
     bank alone, which needs no key or quota (and is what the tests run)."""
     if llm.setting("JOKE_SOURCE", "bank") == "llm":
         return llm_stack(room)

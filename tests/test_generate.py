@@ -457,7 +457,8 @@ def test_the_first_line_is_rendered_before_the_bridge_hands_over(tmp_path):
 
 
 def test_bridge_lines_are_not_repeated_while_unused_ones_remain(tmp_path):
-    lines = [f"b{i}" for i in range(8)]
+    from app import show as show_module
+    lines = [f"b{i}" for i in range(2 * show_module.MAX_BRIDGES + 4)]  # more than two waits can use
     _, voice = show(tmp_path, Gen(delay=0.2), Filter(), bridges=lines, n_bits=3)
     bridges = [t for kind, t in voice.events if kind == "start" and t.startswith("b")]
     assert len(bridges) > 2 and len(set(bridges)) == len(bridges) and bridges == lines[:len(bridges)]
@@ -587,11 +588,13 @@ def test_stack_choice_and_the_live_room_guard(monkeypatch, tmp_path):
     monkeypatch.setattr(safety, "BLOCKLIST_LOCAL", tmp_path / "missing.txt")
     with pytest.raises(safety.SafetyNotReady):
         main.make_stack("live")
+    for name in ("JOKE_WRITER_PROVIDER", "JOKE_WRITER_MODEL", "SAFETY_CHECK_PROVIDER", "SAFETY_CHECK_MODEL", "GEMINI_BASE_URL"):
+        monkeypatch.delenv(name, raising=False)  # an exported shell variable must not change what this test builds
     monkeypatch.setenv("LLM_BASE_URL", "http://x")
     monkeypatch.setenv("LLM_MODEL", "m")
     gen, filt, fallback, bridges = main.make_stack("sim")
     assert isinstance(gen, generate.GeminiGenerator) and isinstance(fallback, BankGenerator) and bridges
-    assert gen.client.retries == filt.client.retries == 2
+    assert gen.client.retries == generate.RETRIES and filt.client.retries == generate.FILTER_RETRIES
 
 
 # --- Exp 20's bookkeeping ---
@@ -687,3 +690,10 @@ def test_bank_plays_counts_the_jokes_that_came_from_the_bank():
             {"event": "candidates", "bit": 0, "joke": 1, "items": [{"reason": "ok"}]},
             {"event": "joke_played", "bit": 0, "joke": 0, "chosen": 1}, {"event": "joke_played", "bit": 0, "joke": 1, "chosen": 0}]
     assert ev.bank_plays(rows) == ["voice failed"]
+
+
+def test_bridge_lines_cover_the_worst_wait_for_a_bit():
+    # A bit prepares after the previous one ends: generation, then the filter, back to back.
+    from app import show
+    worst = generate.GENERATOR_TIMING[1] + generate.FILTER_TIMING[1]
+    assert show.MAX_BRIDGES * 5.0 >= worst  # about 5 s per bridge line

@@ -1,7 +1,7 @@
 """Exp 19: does the safety filter catch the hard-rule lines without rejecting clean ones, rules alone and rules + LLM?
 
 Usage:
-    python -m sim.evaluate_safety --env-file <path to the .env with LLM_*>      # full run, cached
+    python -m sim.evaluate_safety --env-file <path to the .env with GEMINI_* and SAFETY_CHECK_MODEL>      # full run, cached
     python -m sim.evaluate_safety --tune-only --env-file <path>                  # tuning split only, not cached
     python -m sim.evaluate_safety --fresh <yaml of {text, cat, age}> --env-file <path>   # one-shot scoring, not cached
 
@@ -80,11 +80,11 @@ class EvalClient:
         self.retries = 0
         self.failures = 0
 
-    def chat(self, system: str, user: str, *, json_reply: bool = False) -> str:
+    def chat(self, system: str, user: str, *, json_reply: bool = False, validate=None) -> str:
         for attempt in range(self.tries):
             started = time.perf_counter()
             try:
-                reply = self.client.chat(system, user, json_reply=json_reply)
+                reply = self.client.chat(system, user, json_reply=json_reply, validate=validate)
             except llm.LLMError as e:
                 if e.status in RETRY_STATUS and attempt < self.tries - 1:
                     self.retries += 1
@@ -211,7 +211,7 @@ def print_fresh(out: dict) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--env-file", help="a .env holding LLM_BASE_URL, LLM_API_KEY, LLM_MODEL; its values are never printed")
+    ap.add_argument("--env-file", help="a .env holding GEMINI_BASE_URL, GEMINI_API_KEY, SAFETY_CHECK_MODEL (backend/sample.env); its values are never printed")
     ap.add_argument("--fresh", help="YAML list of {text, cat, age}, scored once and not cached")
     ap.add_argument("--tune-only", action="store_true", help="score the tuning split only, not cached")
     a = ap.parse_args()

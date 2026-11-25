@@ -2,6 +2,7 @@
 pymupdf4llm==0.3.4
 pymupdf==1.28.2
 PyYAML==6.0.3
+anthropic==2.14.0
 pytest==8.3.4
 httpx==0.28.1
 python-dotenv==1.1.0

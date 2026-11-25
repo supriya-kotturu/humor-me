@@ -7,3 +7,4 @@ kokoro==0.9.4
 soundfile==0.14.0
 numpy==2.5.4
 PyYAML==6.0.3
+anthropic==2.14.0

@@ -33,6 +33,26 @@ class LLMError(Exception):
         self.retryable = retryable or status in RETRY_STATUS
 
 
+def run_with_retries(client, once: Callable[[float], str]) -> str:
+    """The bounded retry loop shared by every provider's client. `client` carries `timeout`, `retries`, `backoff_s`,
+    `deadline_s`, `sleep` and the `attempts`/`retried`/`failed` counters; `once(timeout)` makes one attempt."""
+    start = time.monotonic()
+    for attempt in range(client.retries + 1):
+        client.attempts += 1
+        left = None if client.deadline_s is None else client.deadline_s - (time.monotonic() - start)
+        try:
+            return once(client.timeout if left is None else max(min(client.timeout, left), 0.1))
+        except LLMError as e:
+            wait = client.backoff_s * 2 ** attempt
+            late = (client.deadline_s is not None
+                    and time.monotonic() - start + wait + MIN_ATTEMPT_S > client.deadline_s)
+            if not e.retryable or attempt == client.retries or late:
+                client.failed += 1
+                raise
+            client.retried += 1
+            client.sleep(wait)
+
+
 @dataclass
 class Client:
     base_url: str
@@ -48,24 +68,12 @@ class Client:
     attempts: int = 0
     retried: int = 0
     failed: int = 0
+    # Token bookkeeping for cost estimates (Exp 24): summed over every reply that carried a usage block.
+    input_tokens: int = 0
+    output_tokens: int = 0
 
     def chat(self, system: str, user: str, *, json_reply: bool = False, temperature: float = 0.0) -> str:
-        start = time.monotonic()
-        for attempt in range(self.retries + 1):
-            self.attempts += 1
-            left = None if self.deadline_s is None else self.deadline_s - (time.monotonic() - start)
-            try:
-                return self._once(system, user, json_reply, temperature,
-                                  self.timeout if left is None else max(min(self.timeout, left), 0.1))
-            except LLMError as e:
-                wait = self.backoff_s * 2 ** attempt
-                late = (self.deadline_s is not None
-                        and time.monotonic() - start + wait + MIN_ATTEMPT_S > self.deadline_s)
-                if not e.retryable or attempt == self.retries or late:
-                    self.failed += 1
-                    raise
-                self.retried += 1
-                self.sleep(wait)
+        return run_with_retries(self, lambda timeout: self._once(system, user, json_reply, temperature, timeout))
 
     def _once(self, system: str, user: str, json_reply: bool, temperature: float, timeout: float) -> str:
         body = {"model": self.model, "temperature": temperature,
@@ -87,7 +95,11 @@ class Client:
                         if time.monotonic() > stop_at:
                             raise LLMError("deadline passed while reading", retryable=True)
                         chunks.append(chunk)
-            choice = json.loads(b"".join(chunks))["choices"][0]
+            body = json.loads(b"".join(chunks))
+            choice = body["choices"][0]
+            usage = body.get("usage") or {}
+            self.input_tokens += int(usage.get("prompt_tokens") or 0)
+            self.output_tokens += int(usage.get("completion_tokens") or 0)
         except httpx.HTTPStatusError as e:
             raise LLMError(f"http {e.response.status_code}", e.response.status_code) from e
         except httpx.HTTPError as e:
@@ -103,11 +115,39 @@ class Client:
         return text
 
 
-def from_env(timeout: float = 8.0, **options) -> Client:
-    """Raises RuntimeError when LLM_BASE_URL or LLM_MODEL is unset; the key may be empty (local Ollama)."""
-    missing = [name for name in ("LLM_BASE_URL", "LLM_MODEL") if not os.environ.get(name)]
+# Settings are named by the job a model does (backend/sample.env). Older .env files used one model for everything;
+# their names are still read when the new one is unset, so a teammate's .env keeps working until they rename it.
+LEGACY = {"GEMINI_BASE_URL": "LLM_BASE_URL", "GEMINI_API_KEY": "LLM_API_KEY", "JOKE_SOURCE": "GENERATOR",
+          "TRANSCRIPT_PIPELINE_MODEL": "PIPELINE_MODEL",
+          "JOKE_WRITER_PROVIDER": "LLM_PROVIDER", "JOKE_WRITER_MODEL": "LLM_MODEL",
+          "SAFETY_CHECK_PROVIDER": "LLM_PROVIDER", "SAFETY_CHECK_MODEL": "LLM_MODEL"}
+ROLES = {"joke_writer": "JOKE_WRITER", "safety_check": "SAFETY_CHECK"}
+PROVIDERS = ("gemini", "anthropic")  # gemini = any OpenAI-compatible endpoint at GEMINI_BASE_URL (Groq, Ollama too)
+
+
+def setting(name: str, default: str = "") -> str:
+    return os.environ.get(name) or os.environ.get(LEGACY.get(name, ""), "") or default
+
+
+def from_env(timeout: float = 8.0, *, role: str = "joke_writer", provider: str | None = None, model: str | None = None,
+             **options):
+    """The client for one job: `role` is `joke_writer` (writes the live jokes) or `safety_check` (judges each line
+    before the voice). `<ROLE>_PROVIDER` is `gemini` (default) or `anthropic` (app.llm_anthropic, the official SDK);
+    `<ROLE>_MODEL` names the model. Both clients expose `chat(system, user, *, json_reply, temperature)` and raise
+    `LLMError`. `provider` and `model` override the env (the Exp 24 harness compares several in one process).
+    Raises RuntimeError when a needed setting is unset; the Gemini-style key may be empty (local Ollama)."""
+    prefix = ROLES[role]
+    provider = provider or setting(f"{prefix}_PROVIDER", "gemini")
+    provider = "gemini" if provider == "openai" else provider  # the old name for the same OpenAI-compatible client
+    if provider == "anthropic":
+        from app import llm_anthropic  # lazy: llm_anthropic imports this module for LLMError
+        return llm_anthropic.from_env(timeout, model=model or setting(f"{prefix}_MODEL") or None, **options)
+    if provider not in PROVIDERS:
+        raise RuntimeError(f"{prefix}_PROVIDER={provider!r}: expected one of {PROVIDERS}")
+    model = model or setting(f"{prefix}_MODEL")
+    base = setting("GEMINI_BASE_URL")
+    missing = [name for name, value in (("GEMINI_BASE_URL", base), (f"{prefix}_MODEL", model)) if not value]
     if missing:
-        raise RuntimeError(f"{' and '.join(missing)} not set: GENERATOR=llm needs both LLM_BASE_URL and LLM_MODEL in "
-                           "backend/.env, and uvicorn only reads that file with --env-file .env")
-    return Client(os.environ["LLM_BASE_URL"], os.environ.get("LLM_API_KEY", ""), os.environ["LLM_MODEL"], timeout,
-                  **options)
+        raise RuntimeError(f"{' and '.join(missing)} not set: JOKE_SOURCE=llm needs them in backend/.env "
+                           "(see backend/sample.env), and uvicorn only reads that file with --env-file .env")
+    return Client(base, setting("GEMINI_API_KEY"), model, timeout, **options)

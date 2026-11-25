@@ -122,6 +122,7 @@ Runs in parallel once T0 is merged: T1, T2, T7, T8.
 | T10 | Consent and raw audio, Exp 21 | T6 |
 | T11 | Rating and acceptance run | T6, T9, T10 |
 | T12 | One decisions notebook per section | T1 |
+| T13 | Pick the generator model, Exp 24 | T9 |
 
 ### T1: ε director and Exp 18
 
@@ -237,6 +238,13 @@ Runs in parallel once T0 is merged: T1, T2, T7, T8.
 - **Tests:** a test that each Exp number appears in exactly one notebook, and that every index entry resolves.
 - **Experiment:** none. **Pass:** the same set of checks before and after (name and count), and no file under `reports/metrics/` changes.
 - **Order:** starts after T1 merges, and before T8's rework, so the notebooks don't conflict.
+
+### T13: Pick the generator model, Exp 24
+
+- **Goal:** choose the model that writes the show's bits: Gemini Flash-Lite (today's), Gemini Flash, or Claude Haiku 5.5.
+- **Build:** a Claude client on the official SDK beside the OpenAI-style one (same `chat`, same errors, same deadline), chosen by `JOKE_WRITER_PROVIDER`; `sim/compare_generators.py` runs 30 fixed prompts through each model exactly as a show does, then the same safety filter. The user ranks one safe thread per model per prompt, blind.
+- **Bar, fixed before any run:** a model is eligible if the p95 latency of its successful bit generations is at most 12 s (the generator's deadline) and at most 5% of its calls fail. Among eligible models the best mean rank wins if the paired 95% CI of the rank gap to the next excludes 0. Otherwise funniness is called inconclusive and the cheaper, then faster, of the two is picked. If none is eligible the generator stays as it is.
+- **Run (the user's keys and votes):** `backend/README.md`, "Comparing generator models". Only numbers reach `reports/metrics/model_comparison.json`.
 
 ## Later stages (planned after T11)
 

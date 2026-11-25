@@ -91,6 +91,7 @@ What we decided and why, one line each. Click an ID for the full record (options
 | [D-85](agent/decisions-detail.md#d-85) | Nov 15 | Acceptance run passed: 3 simulated shows and 1 live show ran clean. Stage 0 is done. |
 | [D-86](agent/decisions-detail.md#d-86) | Nov 24 | Two decision files: this one for people, a detailed one for agents. |
 | [D-87](agent/decisions-detail.md#d-87) | Nov 24 | Docs people read stay short and plain; agent-only detail lives in `docs/agent/`. |
+| [D-88](agent/decisions-detail.md#d-88) | Nov 24 | Compare Gemini Flash-Lite, Gemini Flash and Claude Haiku 5.5 for writing bits: 30 prompts, your blind ranking, and a bar fixed before the run. |
 
 New decision: add its full entry to the detailed log with the next ID, then a row here in the same PR.
 A test fails if the two files' IDs don't match.

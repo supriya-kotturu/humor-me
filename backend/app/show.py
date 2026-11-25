@@ -7,6 +7,7 @@ from typing import Protocol
 
 import numpy as np
 
+from app.cache import CachedBit, screen
 from app.log import SessionLog
 from app.reward import VERSION, reward_v1
 from app.rooms import REACTION
@@ -260,30 +261,131 @@ async def _joke(bit, joke, plans, *, tts, player, source, clock, log, config, sp
 
 # A bit prepares after the previous one ends, so the wait is generation (deadline 12 s) then the filter (25 s), about
 # 37 s at worst; at about 5 s a line, 8 lines cover it. Past that the provider is down, not slow. The 10 bridge lines
-# repeat in a long stall. tests/test_generate.py keeps this in step with app.generate's deadlines.
+# repeat in a long stall. tests/test_generate.py keeps this in step with app.generate's deadlines. Cached and filler
+# lines share this cap.
 MAX_BRIDGES = 8
+# The show-open wait was 7.5 to 11.5 s over 4 Gemini shows and a played line lasts 6.3 s on average (both measured
+# from data/sessions), so two lines cover the worst wait and three leave margin for a slow provider without filling
+# half a minute with lines nobody is rating.
+OPEN_CAP = 3
+# Rendering is serial on the CPU voice, so lines beyond the show-open bit and the next few would only queue in front
+# of the show's own first lines.
+CACHED_RENDERS = 15
 
 
-async def _bridge(prep: asyncio.Task, rendered: list, player, used: list, *, bit, clock, log) -> None:
-    """Fill the wait for the next bit with in-character lines, so the room never hears dead air. Uses whatever has
-    rendered so far and never blocks on the rest; a line is not repeated while an unused one remains. Each line
-    played is a `bridge` row, because it is audio the room heard (invariant 6)."""
+@dataclass(eq=False)
+class _Cached:
+    """A cached line on its way to the room: rendered in the background, `ready` once it has a wav or has failed."""
+    text: str
+    mode: str
+    source: dict  # session, bit, joke, mode: where the line came from, for the `bridge` row
+    wav: bytes | None = None
+    seconds: float = 0.0
+    used: bool = False
+    ready: asyncio.Event | None = None
+
+
+def _cached_pool(cached: dict[str, list[CachedBit]] | None, safety, context: dict) -> tuple[list[list[_Cached]], list[dict]]:
+    """(the cached bits as lines to play, the account of them for the log). Each line passed its own show's filter, not
+    this one's (teen rooms are stricter), so `screen` re-checks every line with the rules layer, once, before the
+    show plays, and keeps a teen room to bits from teen shows."""
+    if not cached:
+        return [], []
+    check = getattr(safety, "check_rules", safety.check)
+    kept, report = screen(cached, check, context["age"], context["venue"])
+    return [[_Cached(line.text, b.mode, {"session": b.session, "bit": b.bit, "joke": line.joke, "mode": b.mode},
+                     ready=asyncio.Event()) for line in b.lines] for b in kept], report
+
+
+def _round_robin(pool: list[list[_Cached]], skip: list[_Cached]) -> list[_Cached]:
+    """The lines still to render, one mode at a time in turn (each mode's bits best first), so a next bit of any mode
+    with a cache finds a rendered line instead of one mode's top bits taking every slot."""
+    by_mode: dict[str, list[_Cached]] = {}
+    for group in pool:
+        by_mode.setdefault(group[0].mode, []).extend(e for e in group if e not in skip and not e.ready.is_set())
+    out = []
+    while any(by_mode.values()):
+        for lines in by_mode.values():
+            if lines:
+                out.append(lines.pop(0))
+    return out
+
+
+async def _render_cached(entries: list[_Cached], tts, clock, after: asyncio.Task | None = None) -> None:
+    """In order, so the first line to play is the first to be ready. A line that will not render is just skipped.
+    `after` is the render task this one chains behind, so the voice, which is serial, never has two cached lines
+    asking at once and a bit's own first line waits behind at most one."""
+    if after is not None:
+        await asyncio.wait({after})
+    for e in entries:
+        try:
+            e.wav, e.seconds = await _render(tts, e.text, clock)
+        except Exception:  # filler must never stop the show
+            _log.warning("a cached line did not render", exc_info=True)
+        e.ready.set()
+
+
+async def _play_cached(e: _Cached, player, *, bit, clock, log) -> None:
+    """A cached line is a `bridge` row marked cached, never a reaction window (replay must see no new labels)."""
+    e.used = True  # before the await: a line is never said twice in a show
+    start = clock.now()
+    await player.play(e.wav, e.text)
+    log.write("bridge", bit=bit, text=e.text, tts_seconds=e.seconds, audio_start_at=start, audio_end_at=clock.now(),
+              kind="cached", source=e.source)
+
+
+async def _open_cached(prep: asyncio.Task, entries: list[_Cached], player, *, clock, log) -> None:
+    """Fill the show-open wait with one cached bit's lines, in order, while bit 0 prepares. Waits for the next line's
+    render only while bit 0 is still not ready, so a render never delays the bit itself."""
+    for e in entries[:OPEN_CAP]:
+        if prep.done():
+            return
+        if not e.ready.is_set():
+            waiter = asyncio.ensure_future(e.ready.wait())
+            try:
+                await asyncio.wait({prep, waiter}, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                waiter.cancel()  # also on an abort, which cancels this await
+            if prep.done():
+                return
+        if e.wav is not None:
+            await _play_cached(e, player, bit=0, clock=clock, log=log)
+
+
+def _next_cached(pool: list[list[_Cached]], mode: str | None) -> _Cached | None:
+    """The best rendered line not yet said, from the next bit's mode when there is one."""
+    ready = [e for group in pool for e in group if e.wav is not None and not e.used]
+    return next((e for e in ready if e.mode == mode), ready[0] if ready else None)
+
+
+async def _bridge(prep: asyncio.Task, rendered: list, player, used: list, *, bit, clock, log,
+                  pool: list[list[_Cached]] = (), mode: str | None = None) -> None:
+    """Fill the wait for the next bit with cached lines first (the next bit's mode preferred), then in-character
+    bridge lines. Uses whatever has rendered so far and never blocks on the rest; a line is not repeated while an
+    unused one remains. Each line played is a `bridge` row, because it is audio the room heard (invariant 6)."""
     for _ in range(MAX_BRIDGES):
-        if prep.done() or not rendered:
+        if prep.done():
+            return
+        if cached := _next_cached(pool, mode):
+            await _play_cached(cached, player, bit=bit, clock=clock, log=log)
+            continue
+        if not rendered:
             return
         unused = [b for b in rendered if b[0] not in used]
         text, wav, tts_seconds = unused[0] if unused else rendered[len(used) % len(rendered)]
         used.append(text)
         start = clock.now()
         await player.play(wav, text)
-        log.write("bridge", bit=bit, text=text, tts_seconds=tts_seconds, audio_start_at=start, audio_end_at=clock.now())
+        log.write("bridge", bit=bit, text=text, tts_seconds=tts_seconds, audio_start_at=start, audio_end_at=clock.now(),
+                  kind="filler")
 
 
 async def run_show(director, room: str, context: dict, *, generator: Generator, safety: SafetyFilter,
                    selector: Selector, tts: TTS, player: Player, source: RewardSource, clock: Clock, log: SessionLog,
                    explore_seed: int | None = None, operator: str = "sim", git_sha: str = "unknown",
                    audio: dict | None = None, n_bits: int = 8, jokes_per_bit: int = 5, config=REACTION,
-                   fallback: Generator | None = None, bridge_lines: list[str] | None = None) -> None:
+                   fallback: Generator | None = None, bridge_lines: list[str] | None = None,
+                   cached: dict[str, list[CachedBit]] | None = None) -> None:
     """One show. `director` is an EpsilonSoft over LinUCB, already warm: the caller replays the career into it
     (app.director.load_director) so this loop never decides which rooms count."""
     modes = AudienceEnv().modes
@@ -306,11 +408,15 @@ async def run_show(director, room: str, context: dict, *, generator: Generator, 
                 rendered.append((text, wav, seconds))
             except Exception:  # filler must never stop the show
                 _log.warning("bridge line did not render: %r", text, exc_info=True)
+    pool, cache_report = _cached_pool(cached, safety, context)
     log.write("show_start", room=room, context=context,
               policy={"name": "linucb", "epsilon": director.eps, "alpha": inner.alpha, "prior": "uniform",
                       "seed": explore_seed},
               generator_id=generator.generator_id, selector_id=selector.selector_id, git_sha=git_sha,
               operator=operator, audio=audio or {"consent": False, "path": None})
+    if cache_report:  # invariant 6: what the show could play, and what the re-check dropped
+        log.write("cache", bits=cache_report)
+    opened: asyncio.Task | None = None
     try:
         last_action = last_reward = None
         for bit in range(n_bits):
@@ -327,11 +433,23 @@ async def run_show(director, room: str, context: dict, *, generator: Generator, 
             prep = spawn(_prepare(bit, modes[action], context, generator=generator, fallback=fallback, safety=safety,
                                   selector=selector, tts=tts, clock=clock, log=log, jokes_per_bit=jokes_per_bit,
                                   spawn=spawn))
-            if bridge_lines and bit > 0:
-                await _bridge(prep, rendered, player, bridges_used, bit=bit, clock=clock, log=log)
+            if bit == 0 and pool:
+                # Bit 0 cannot start for 7 to 12 s (generate, filter, first render): play the best cached bit of its
+                # mode, else the best of any, and render it now, while the voice is free.
+                opener = next((g for g in pool if g[0].mode == modes[action]), pool[0])
+                opened = spawn(_render_cached(opener[:OPEN_CAP], tts, clock))
+                await _open_cached(prep, opener, player, clock=clock, log=log)
+            elif (bridge_lines or pool) and bit > 0:
+                await _bridge(prep, rendered, player, bridges_used, bit=bit, clock=clock, log=log, pool=pool,
+                              mode=modes[action])
             plans = await prep
-            if bridge_lines and bit == 0:
-                spawn(render_bridges())  # after bit 0's first line, so the voice is not busy when the show opens
+            if bit == 0:
+                # after bit 0's first line, so the voice is not busy when the show opens
+                rest = _round_robin(pool, opener[:OPEN_CAP]) if pool else []
+                if rest:
+                    spawn(_render_cached(rest[:CACHED_RENDERS], tts, clock, after=opened))
+                if bridge_lines:
+                    spawn(render_bridges())
             levels = [await _joke(bit, joke, plans, tts=tts, player=player, source=source, clock=clock, log=log,
                                   config=config, spawn=spawn) for joke in range(jokes_per_bit)]
             reward = reward_v1(levels)

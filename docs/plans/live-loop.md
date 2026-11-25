@@ -90,7 +90,8 @@ JSONL, one file per show in `data/sessions/`. Every row has `schema: 2`, `sessio
 | `bit_decision` | `bit`, raw `obs` (`t`, `n_bits`, `context`, `last_mode`), `scores` per mode, `greedy`, `action`, `probs` |
 | `candidates` | `bit`, `joke`, `prompt_id`, `prompt`, `generator_id`, `items` (text, verdict, reason) |
 | `joke_played` | `bit`, `joke`, `chosen`, `pick_prob`, `text`, `tts_seconds`, `audio_seconds`, `audio_start_at`, `audio_end_at` |
-| `bridge` | `bit` (the bit it precedes), `text`, `tts_seconds`, `audio_start_at`, `audio_end_at`; one per bridge line played, in play order (v2) |
+| `bridge` | `bit` (the bit it precedes; 0 for the show-open), `text`, `tts_seconds`, `audio_start_at`, `audio_end_at`; one per bridge line played, in play order (v2). Optional: `kind` (`filler` or `cached`) and, for `cached`, `source` (`session`, `bit`, `joke`; also `mode`): a cached bit's line is never rated (D-91) |
+| `cache` | `bits`: the cached bits the show could draw on, `{session, bit, mode, reward, source_age, lines: [{joke, text, verdict, reason}]}`, with the re-check's verdict on every line; written right after `show_start`, only when a cache was given (v2, optional; replay ignores it) |
 | `reaction` | `bit`, `joke`, `source` (`button`\|`detector`\|`sim`), `level` (0–3 or null), `key`, `latency_s` |
 | `gap` | `bit`, `joke`, `planned_hold_s`, `actual_gap_s` |
 | `bit_end` | `bit`, `n_labels`, `reward_version`, `reward` (cross-check only) |
@@ -242,8 +243,9 @@ Runs in parallel once T0 is merged: T1, T2, T7, T8.
 ### T13: Pick the generator model, Exp 24
 
 - **Goal:** choose the model that writes the show's bits: Gemini Flash-Lite (today's), Gemini Flash, or Claude Haiku 5.5.
-- **Build:** a Claude client on the official SDK beside the OpenAI-style one (same `chat`, same errors, same deadline), chosen by `JOKE_WRITER_PROVIDER`; `sim/compare_generators.py` runs 30 fixed prompts through each model exactly as a show does, then the same safety filter. The user ranks one safe thread per model per prompt, blind.
-- **Bar, fixed before any run:** a model is eligible if the p95 latency of its successful bit generations is at most 12 s (the generator's deadline) and at most 5% of its calls fail. Among eligible models the best mean rank wins if the paired 95% CI of the rank gap to the next excludes 0. Otherwise funniness is called inconclusive and the cheaper, then faster, of the two is picked. If none is eligible the generator stays as it is.
+- **Build:** a Claude client on the official SDK beside the Gemini one (same `chat`, same errors, same deadline and re-ask), chosen by `JOKE_WRITER_PROVIDER`; `sim/compare_generators.py` runs 30 fixed prompts through each model exactly as a show does, then the same safety filter. The user ranks the models' safe threads per prompt, blind.
+- **Bar, fixed before any run (changed once after review, before any data):** a model is eligible if (1) the p95 latency over all its calls is at most 12 s (the generator's deadline), a call that timed out counting as above it, and (2) the 95% Wilson upper bound of its failure rate, over every attempt made, is at most 15% (at 30 attempts, 0 failures pass and 1 fails). Among eligible models the best mean rank wins if the paired 95% CI of the rank gap to the next excludes 0. Otherwise funniness is called inconclusive and the cheaper, then faster, of the two is picked. If none is eligible the generator stays as it is. A model with no safe thread for a prompt is ranked last for it, and the prompt is kept.
+- **Power:** 30 prompts detect only a large funniness gap (about 0.8 ranks, 81% of the time); the gap's CI half-width is about 0.5 ranks (D-92).
 - **Run (the user's keys and votes):** `backend/README.md`, "Comparing generator models". Only numbers reach `reports/metrics/model_comparison.json`.
 
 ## Later stages (planned after T11)

@@ -44,7 +44,7 @@ from sim.evaluate_safety import wilson  # noqa: E402
 
 DEADLINE_S = generate.GENERATOR_TIMING[1]  # wall time a bit may take over all attempts: what the bridge lines cover
 BAR_FAILURE_UPPER = 0.15  # on the 95% Wilson upper bound of the failure rate, so it needs enough attempts to be met
-N_PROMPTS = 30  # power reasoning in docs/agent/decisions-detail.md D-90
+N_PROMPTS = 30  # power reasoning in docs/agent/decisions-detail.md D-92
 SEED = 24
 N_BOOT = 10_000
 BITS_PER_5_SHOWS = 40  # 8 bits x 5 shows, the demo's horizon
@@ -64,7 +64,7 @@ class Spec:
     gap_s: float  # minimum seconds between the end of one request and the start of the next in the bucket
 
 
-# Claude's price is from the user (D-90). The Gemini prices are ASSUMED list prices for the paid tier (the free tier
+# Claude's price is from the user (D-92). The Gemini prices are ASSUMED list prices for the paid tier (the free tier
 # costs $0 and is what a show uses today); `-latest` aliases move, so check them against the key's billing page before
 # reading the cost column. Claude's output tokens include its thinking. All prices are part of the scored result's key.
 MODELS = {

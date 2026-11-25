@@ -21,6 +21,8 @@ VALID = {
     "joke_played": dict(bit=0, joke=0, chosen=0, pick_prob=0.5, text="x", tts_seconds=0.1, audio_seconds=1.0,
                         audio_start_at=1.0, audio_end_at=2.0),
     "bridge": dict(bit=1, text="Give me a second.", tts_seconds=0.9, audio_start_at=3.0, audio_end_at=5.0),
+    "cache": dict(bits=[dict(session="s0", bit=1, mode="cynic", reward=0.7, source_age="mixed",
+                             lines=[dict(joke=0, text="A line.", verdict="pass", reason="rules: ok")])]),
     "reaction": dict(bit=0, joke=0, source="button", level=2, key="K", latency_s=0.4),
     "gap": dict(bit=0, joke=0, planned_hold_s=1.5, actual_gap_s=1.6),
     "bit_end": dict(bit=0, n_labels=5, reward_version=1, reward=0.5),

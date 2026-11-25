@@ -8,6 +8,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.bank import BankGenerator
+from app.cache import cached_for
 from app.director import load_director
 from app import llm
 from app.generate import llm_stack
@@ -160,7 +161,8 @@ async def _show(ws: WebSocket, msg: dict, played: asyncio.Queue, live: types.Sim
                        selector=UniformSelector(secrets.randbits(32)), tts=tts,
                        player=WebSocketPlayer(ws.send_json, ws.send_bytes, played), source=source,
                        clock=clock, log=show_log, explore_seed=seed, operator=msg["operator"],
-                       audio=audio, git_sha=sha, config=reaction_config, fallback=fallback, bridge_lines=bridge_lines)
+                       audio=audio, git_sha=sha, config=reaction_config, fallback=fallback, bridge_lines=bridge_lines,
+                       cached=cached_for(bridge_lines, sessions))
         status = "finished"
     except Exception as e:  # cancellation is not caught: a closed socket has nobody to tell
         log.exception("show failed")

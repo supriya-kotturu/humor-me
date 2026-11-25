@@ -18,6 +18,7 @@ EVENTS = {
     "joke_played": ("bit", "joke", "chosen", "pick_prob", "text", "tts_seconds", "audio_seconds",
                     "audio_start_at", "audio_end_at"),
     "bridge": ("bit", "text", "tts_seconds", "audio_start_at", "audio_end_at"),
+    "cache": ("bits",),  # the cached bits the show could draw on, written right after show_start (D-91)
     "reaction": ("bit", "joke", "source", "level", "key", "latency_s"),
     "gap": ("bit", "joke", "planned_hold_s", "actual_gap_s"),
     "bit_end": ("bit", "n_labels", "reward_version", "reward"),
@@ -30,6 +31,9 @@ CHOICES = {
     ("reaction", "source"): ("button", "detector", "sim"),
     ("show_end", "status"): ("finished", "aborted"),
 }
+# Optional fields: checked only when present, so a log written before they existed stays valid.
+OPTIONAL_CHOICES = {("bridge", "kind"): ("filler", "cached")}
+CACHED_SOURCE = ("session", "bit", "joke")  # where a cached line came from; a bridge row of kind "cached" needs it
 
 
 NESTED = {
@@ -67,17 +71,29 @@ def validate(record: dict) -> None:
     event = record["event"]
     if not isinstance(event, str) or event not in EVENTS:
         raise ValueError(f"unknown event {event!r}")
-    if event == "bridge" and record["schema"] < 2:
-        raise ValueError("a schema 1 log has no bridge event")
+    if event in ("bridge", "cache") and record["schema"] < 2:
+        raise ValueError(f"a schema 1 log has no {event} event")
     _need_keys(event, record, EVENTS[event])
     for (name, field), allowed in CHOICES.items():
         if name == event and record[field] not in allowed:
             raise ValueError(f"{event}.{field} must be one of {allowed}, got {record[field]!r}")
+    for (name, field), allowed in OPTIONAL_CHOICES.items():
+        if name == event and field in record and record[field] not in allowed:
+            raise ValueError(f"{event}.{field} must be one of {allowed}, got {record[field]!r}")
+    if event == "bridge" and record.get("kind") == "cached":
+        _need_keys("bridge.source", record.get("source"), CACHED_SOURCE)
     for (name, field), keys in NESTED.items():
         if name == event:
             _need_keys(f"{event}.{field}", record[field], keys)
     if event == "show_start" and record["audio"]["path"] is not None             and not isinstance(record["audio"].get("start_at"), (int, float)):
         raise ValueError("show_start.audio.start_at must be a number when a recording exists")
+    if event == "cache":
+        if not isinstance(record["bits"], list):
+            raise ValueError("cache.bits must be a list")
+        for i, b in enumerate(record["bits"]):
+            _need_keys(f"cache.bits[{i}]", b, ("session", "bit", "mode", "reward", "source_age", "lines"))
+            for j, line in enumerate(b["lines"]):
+                _need_keys(f"cache.bits[{i}].lines[{j}]", line, ("joke", "text", "verdict", "reason"))
     if event == "candidates":
         if not isinstance(record["items"], list):
             raise ValueError("candidates.items must be a list")

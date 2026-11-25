@@ -58,7 +58,7 @@ The mode the director picked is never sent. Presses outside their window are not
 row), only noted by the Python logger. Within a hold the last press wins and each change is a `reaction` row.
 By default the show uses the bank and a bank-only filter (`BankOnlySafety`), which needs no key. `JOKE_SOURCE=llm` switches to the
 real stack (`app/generate.py`): one model call per bit for 5 jokes x 3 candidates, the safety filter's rules plus one LLM verdict call
-per bit, the next line rendered while the current one plays, and in-character bridge lines while a bit loads. A failed call is retried
+per bit, the next line rendered while the current one plays, and filler while a bit loads: cached lines from the best bits of earlier live shows (`app/cache.py`, rules re-checked for this room's age, a teen room only from teen shows, never rated, logged in a `cache` row) at the show open and between bits, then in-character bridge lines. A failed call is retried
 twice inside a deadline; a failed generation or a bit whose candidates are all rejected falls back to the hand-checked bank (rules only, no API call), logged in
 `candidates`. A `live` room refuses to start without `app/blocklist.local.txt`.
 
@@ -105,13 +105,23 @@ It prints a table per show (valid rows, status, bank share, bridges, label count
 
 Compares Gemini Flash-Lite (today's), Gemini Flash and Claude Haiku 5.5 on 30 bits. The bar is fixed in [the plan](../docs/plans/live-loop.md) (T13). Run from the repo root, in the root venv, in the main checkout (the keys are there).
 
-1. **Keys in `backend/.env`:** `GEMINI_API_KEY` (Gemini, as today) and `ANTHROPIC_API_KEY` (a paid key; Claude is not free). If `app/blocklist.local.txt` exists it is used by the filter's rules, as in a live show.
-2. **Generate (about 25 minutes, paced for the free tier, resumable):** `.venv/Scripts/python -m sim.compare_generators run --env-file backend/.env`. Stop and rerun any time; finished calls are not repeated. A bad key stops the run without saving a failure. `--redo-failed` repeats failed calls, `--models gemini-flash-lite,claude-haiku-5-5` picks models, `--n 36` adds prompts.
-3. **Ballot:** `python -m sim.compare_generators export` writes `ballot.md`, `key.json` and `votes.csv` under `data/model_comparison/gen-<digest>/`. It lists any prompt dropped because a model had no safe thread.
-4. **Vote (about 40 minutes):** `python -m sim.compare_generators vote` shows each prompt and asks for the order, best first (`BAC`). It saves after every answer, `s` skips, `q` quits; run it again to continue. Don't open `key.json`. Or fill `votes.csv` by hand from `ballot.md`.
+1. **Keys in `backend/.env`** (names as in `backend/sample.env`): `GEMINI_BASE_URL`, `GEMINI_API_KEY` and `ANTHROPIC_API_KEY` (a paid key; Claude is not free). The models are named by the harness, not by `JOKE_WRITER_MODEL`. If `app/blocklist.local.txt` exists the filter's rules use it, as in a live show.
+2. **Generate (about 25 minutes, paced for the free tier, resumable):** `.venv/Scripts/python -m sim.compare_generators run --env-file backend/.env`. Stop and rerun any time; finished calls are not repeated. A bad key, a wrong model name or any unexpected error on a model's first call stops the run and saves nothing. `--redo-failed` adds a new attempt where the last one failed for a key, setting or provider-availability reason (every attempt is kept and counts toward the failure rate); `--models gemini-flash-lite,claude-haiku-5-5` picks models, `--n 36` adds prompts.
+3. **Ballot:** `python -m sim.compare_generators export` (after `run` has finished) writes `ballot.md` and `votes.csv` under `data/model_comparison/gen-<digest>/` and the key apart in `data/model_comparison/key/`. A model with no safe thread for a prompt is not shown and is ranked last for it.
+4. **Vote (about 40 minutes):** `python -m sim.compare_generators vote` shows each prompt and asks for the order, best first (`BAC`). It saves after every answer, `s` skips, `q` quits; run it again to continue. Don't open the `key` folder. Or fill `votes.csv` by hand from `ballot.md`.
 5. **Score:** `python -m sim.compare_generators score` prints the table and the pick, and saves numbers only to `reports/metrics/model_comparison.json`. Then `python scripts/run_notebook.py` to refresh the Exp 24 section and commit the metrics file.
 
-Everything under `data/model_comparison/` (joke text, ballot, key, votes) is gitignored: never commit it. `JOKE_WRITER_PROVIDER=anthropic` with `JOKE_WRITER_MODEL=claude-haiku-5-5` also runs a show on Claude (`app/llm_anthropic.py`); the safety filter then uses Claude too, so keep the default for now.
+Everything under `data/model_comparison/` (joke text, ballot, key, votes) is gitignored: never commit it. To run a show on Claude, set `JOKE_WRITER_PROVIDER=anthropic` (the model defaults to `claude-haiku-5-5`); the safety check stays on Gemini unless `SAFETY_CHECK_PROVIDER=anthropic` is set too, so leave it for now.
+
+## Cached bits run (Exp 23)
+
+After a live show, run three simulated shows on `GENERATOR=llm`, then score them from the repo root. Plain, it prints and saves nothing; `--record` keeps numbers and ids only (`reports/metrics/cached_bits.json`):
+
+```sh
+python -m sim.evaluate_cached <sim id 1> <sim id 2> <sim id 3> [--record]
+```
+
+Bar: show-open silence at most 2 s on each of the 3. A show whose bit 0 had no cached bit does not count. Between-bit silence is printed beside it, with no bar.
 
 ## Pick a provider first
 

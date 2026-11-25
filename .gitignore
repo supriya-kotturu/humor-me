@@ -242,3 +242,6 @@ data/sessions/
 # Permission emails: personal addresses, and this repo is public
 data/permissions/
 backend/app/blocklist.local.txt
+
+# Exp 24 model comparison: generated joke text, ballot, key and votes; local only
+data/model_comparison/

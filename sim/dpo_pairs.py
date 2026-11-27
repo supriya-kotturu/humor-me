@@ -9,6 +9,7 @@ shares the one GPU and the show's 12 s bit deadline would suffer):
     python -m sim.dpo_pairs pool                              # once: freeze the prompts (reads data/tonight/**/fetch.json)
     python -m sim.dpo_pairs write --split ranking --env-file backend/.env [--n N]   # in the background; resumable
     python -m sim.dpo_pairs write --split train   --env-file backend/.env [--n N]   # can run while you rank
+    python -m sim.dpo_pairs topup --split ranking --env-file backend/.env   # after write: bits with under 2 clean threads get up to 2 more batches
     python -m sim.dpo_pairs rank [--limit 20]                 # you pick the funnier thread of a pair, in sittings
     python -m sim.dpo_pairs judge --env-file backend/.env     # the gate: 120 calls (60 test pairs, both orders)
     python -m sim.dpo_pairs score --record                    # numbers -> reports/metrics/dpo_judge_gate.json
@@ -441,6 +442,70 @@ def write(split: str, client, live_safety, pool: dict, root: pathlib.Path | None
     return wrote
 
 
+MAX_TOPUPS = 2  # extra batches of 3 threads per bit: judgment call, not measured
+
+
+def clean_count(rec: dict) -> int:
+    return sum(bool(t.get("safe")) for t in rec["threads"])
+
+
+def topup_bit(client, live_safety, rec: dict, prompt: dict, days: dict[str, dict]) -> dict | None:
+    """One more batch of 3 threads for a written bit, on the request stored in the record. Appends the threads that came
+    back (the originals stay, in front) and returns the new record; None when no thread came back or the safety layer
+    failed (nothing is stored, so a rerun tries again). Raises if the request is not the stored one."""
+    gen = new_generator(client, prompt, days)
+    set_allow(live_safety, prompt, days)
+    start = time.perf_counter()
+    try:
+        gen.generate(prompt["mode"], prompt["bit"], 0, prompt["context"])
+    except Exception:  # noqa: BLE001 - no thread this time is not a crash
+        return None
+    request, lines_major, premises, lost = gen._bits[prompt["bit"]]
+    if request != rec["request"] or gen.generator_id != rec["generator_id"] or             request_digest(request, gen.generator_id) != rec["digest"]:
+        raise SystemExit(f"{rec['id']}: the request rebuilt from the pool is not the stored one; nothing was changed")
+    batch = len(rec.get("topups", [])) + 1
+    new = [{"premise": premises[i], "lines": [lines_major[j][i] for j in range(generate.JOKES)], "batch": batch}
+           for i in range(len(premises))]
+    if check_threads(new, live_safety, prompt["context"]["age"]):
+        return None
+    out = dict(rec)
+    out["threads"] = [{**t, "batch": t.get("batch", 0)} for t in rec["threads"]] + new
+    out["topups"] = list(rec.get("topups", [])) + [{
+        "batch": batch, "digest": request_digest(request, gen.generator_id), "threads": len(new), "lost": list(lost),
+        "wall_s": time.perf_counter() - start, "rules": safety.RULES_VERSION,
+        "at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}]
+    return out
+
+
+def topup(split: str, client, live_safety, pool: dict, root: pathlib.Path | None = None, cap: int = MAX_TOPUPS,
+          out=print) -> int:
+    """For every written bit with fewer than 2 clean threads, writes up to `cap` more batches on the stored request until
+    it has 2. Bits with 2 or more are never touched, so a pair already shown stays the pair shown. Same stop as `write`
+    (MAX_EMPTY_IN_A_ROW bits with no thread). Returns the number of batches added."""
+    root = root or DATA
+    days = {d["date"]: d for d in pool["days"]}
+    mine = [p for p in pool["prompts"] if p["split"] == split]
+    todo = [(p, r) for p in mine if (r := _read(bit_path(root, split, p["id"]))) is not None and same_prompt(r, p)
+            and done(r) and clean_count(r) < 2 and len(r.get("topups", [])) < cap]
+    added = empty = 0
+    for i, (p, rec) in enumerate(todo, 1):
+        while clean_count(rec) < 2 and len(rec.get("topups", [])) < cap:
+            new = topup_bit(client, live_safety, rec, p, days)
+            if new is None:
+                empty += 1
+                out(f"[{i}/{len(todo)}] {p['id']}: no usable batch")
+                if empty >= MAX_EMPTY_IN_A_ROW:
+                    raise SystemExit(f"{empty} batches in a row came back with no thread: is Ollama up? "
+                                     "Finished bits are saved; rerun to resume")
+                break
+            empty = 0
+            rec = new
+            _write(bit_path(root, split, p["id"]), rec)
+            added += 1
+            out(f"[{i}/{len(todo)}] {p['id']} batch {len(rec['topups'])}: {clean_count(rec)} clean of {len(rec['threads'])}")
+    return added
+
+
 # --- ranking -------------------------------------------------------------------------------------------------------------
 
 def read_state(root: pathlib.Path) -> dict:
@@ -719,7 +784,7 @@ def table(res: dict) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("command", choices=("pool", "write", "rank", "judge", "score"))
+    ap.add_argument("command", choices=("pool", "write", "topup", "rank", "judge", "score"))
     ap.add_argument("--split", choices=("ranking", "train"), help="write: which split; pool --rebuild --split train rebuilds only the training split")
     ap.add_argument("--n", type=int, help="write: stop after this many new bits")
     ap.add_argument("--limit", type=int, help="rank: ask at most this many questions this sitting")
@@ -745,9 +810,9 @@ def main() -> None:
         pool = ensure_pool(tonight_dir=tonight_dir, rebuild=a.rebuild)
         print(f"pool {pool['digest']}: {json.dumps(sizes(pool))}; tonight days: {[d['date'] for d in pool['days']]}")
         return
-    if a.command == "write":
+    if a.command in ("write", "topup"):
         if not a.split:
-            raise SystemExit("write needs --split ranking or --split train")
+            raise SystemExit(f"{a.command} needs --split ranking or --split train")
         pool = ensure_pool(tonight_dir=tonight_dir)
         client = generate.writer_client()
         if not getattr(client, "local", False):
@@ -757,6 +822,9 @@ def main() -> None:
         live_safety = generate.LiveSafety(llm.from_env(generate.FILTER_TIMING[0], role="safety_check", retries=generate.FILTER_RETRIES,
                                                        deadline_s=generate.FILTER_TIMING[1]))
         try:
+            if a.command == "topup":
+                print(f"added {topup(a.split, client, live_safety, pool)} batches")
+                return
             wrote = write(a.split, client, live_safety, pool, n=a.n)
         except KeyboardInterrupt:
             raise SystemExit("stopped; finished bits are saved, rerun to resume")

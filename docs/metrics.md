@@ -1096,6 +1096,8 @@ Also reported, with no bar: how often the two orders disagree, agreement for eac
 | Agreement, tonight half / plain half | pending | beside the bar |
 | Verdict | pending | the bar |
 
+Top-up: about 40% of threads fail the show's safety check, so bits with fewer than 2 clean threads get up to 2 more batches on the same request (`topup`); bits you may already have seen are not changed.
+
 How to run it: the commands are at the end of D-121.
 
 Caveats:

@@ -690,3 +690,106 @@ def test_a_rebuild_refuses_when_a_day_the_ranking_split_used_is_gone_or_changed(
     with pytest.raises(SystemExit, match="missing or changed"):
         dp.rebuild_train(root, fetches)
     assert dp._read(dp.pool_path(root)) == old
+
+
+# --- top-up --------------------------------------------------------------------------------------------------------------
+
+def written(sp, tmp_path, bad):
+    """Writes the first bits of `sp` with a fake writer whose numbered threads in `bad` carry a rejected line."""
+    fake, s = FakeOllama(bad=bad), FakeSafety()
+    dp.write("ranking", fake.client(), s, sp, tmp_path, out=lambda *_: None)
+    return fake, s
+
+
+def recs(sp, tmp_path):
+    return [dp._read(dp.bit_path(tmp_path, "ranking", p["id"])) for p in sp["prompts"]]
+
+
+def test_topup_fills_only_bits_with_fewer_than_two_clean_threads(pool, tmp_path):
+    sp = small_pool(pool, 3)
+    fake, s = written(sp, tmp_path, bad={1, 2, 7, 8, 9})  # bit 0: 1 clean, bit 1: 3 clean, bit 2: 0 clean
+    before = recs(sp, tmp_path)
+    assert [dp.clean_count(r) for r in before] == [1, 3, 0]
+    assert dp.topup("ranking", fake.client(), s, sp, tmp_path, out=lambda *_: None) == 2
+    after = recs(sp, tmp_path)
+    assert after[1] == before[1] and "topups" not in after[1]  # 2+ clean: never touched
+    assert [dp.clean_count(r) for r in after] == [4, 3, 3]
+    assert len(fake.seen) == 9 + 6
+    assert [t["batch"] for t in after[0]["threads"]] == [0, 0, 0, 1, 1, 1]
+    top = after[0]["topups"][0]
+    assert top["batch"] == 1 and top["digest"] == after[0]["digest"] and top["at"] and top["threads"] == 3
+
+
+def test_topup_sends_the_stored_request_byte_for_byte(pool, tmp_path):
+    sp = small_pool(pool, 1)
+    fake, s = written(sp, tmp_path, bad={1, 2, 3})
+    before = recs(sp, tmp_path)[0]
+    dp.topup("ranking", fake.client(), s, sp, tmp_path, out=lambda *_: None)
+    after = recs(sp, tmp_path)[0]
+    assert after["request"] == before["request"] and after["generator_id"] == before["generator_id"]
+    assert all(b["messages"] == fake.seen[0]["messages"] for b in fake.seen[3:6])
+    assert "\n\n".join(m["content"] for m in fake.seen[3]["messages"]) == before["request"]
+
+
+def test_topup_refuses_when_the_rebuilt_request_differs(pool, tmp_path):
+    sp = small_pool(pool, 1)
+    fake, s = written(sp, tmp_path, bad={1, 2, 3})
+    path = dp.bit_path(tmp_path, "ranking", sp["prompts"][0]["id"])
+    rec = dp._read(path)
+    rec["request"] += " changed"
+    dp._write(path, rec)
+    with pytest.raises(SystemExit, match="not the stored one"):
+        dp.topup("ranking", fake.client(), s, sp, tmp_path, out=lambda *_: None)
+    assert dp._read(path) == rec
+
+
+def test_topup_stops_at_the_cap_and_a_rerun_adds_nothing(pool, tmp_path):
+    sp = small_pool(pool, 1)
+    fake, s = written(sp, tmp_path, bad=set(range(1, 100)))
+    assert dp.topup("ranking", fake.client(), s, sp, tmp_path, out=lambda *_: None) == dp.MAX_TOPUPS == 2
+    rec = recs(sp, tmp_path)[0]
+    assert len(rec["threads"]) == 9 and len(rec["topups"]) == 2 and dp.clean_count(rec) == 0
+    seen = len(fake.seen)
+    assert dp.topup("ranking", fake.client(), s, sp, tmp_path, out=lambda *_: None) == 0 and len(fake.seen) == seen
+    assert dp.topup("ranking", fake.client(), s, sp, tmp_path, cap=3, out=lambda *_: None) == 1
+
+
+def test_topup_stops_a_bit_as_soon_as_it_has_two_clean(pool, tmp_path):
+    sp = small_pool(pool, 1)
+    fake, s = written(sp, tmp_path, bad={1, 2, 3, 4, 5, 6})  # batch 1 is still bad, batch 2 is clean
+    assert dp.topup("ranking", fake.client(), s, sp, tmp_path, out=lambda *_: None) == 2
+    assert [t["batch"] for t in recs(sp, tmp_path)[0]["threads"]][-3:] == [2, 2, 2]
+
+
+def test_topup_is_resumable_and_leaves_whole_files(pool, tmp_path, monkeypatch):
+    sp = small_pool(pool, 3)
+    fake, s = written(sp, tmp_path, bad={1, 2, 3, 4, 5, 6, 7, 8, 9})
+    real, calls = dp._write, []
+
+    def flaky(path, rec):
+        calls.append(path)
+        if len(calls) == 2:
+            raise KeyboardInterrupt
+        real(path, rec)
+    monkeypatch.setattr(dp, "_write", flaky)
+    with pytest.raises(KeyboardInterrupt):
+        dp.topup("ranking", fake.client(), s, sp, tmp_path, out=lambda *_: None)
+    monkeypatch.setattr(dp, "_write", real)
+    assert not list(tmp_path.rglob("*.tmp"))
+    assert [dp.clean_count(r) for r in recs(sp, tmp_path)] == [3, 0, 0]
+    assert dp.topup("ranking", fake.client(), s, sp, tmp_path, out=lambda *_: None) == 2
+    assert [dp.clean_count(r) for r in recs(sp, tmp_path)] == [3, 3, 3]
+
+
+def test_a_pair_already_shown_is_the_same_after_topup(pool, tmp_path):
+    sp = small_pool(pool, 3)
+    fake, s = written(sp, tmp_path, bad={1, 2})  # bit 0 needs a top-up, bits 1 and 2 are pairable
+    before = recs(sp, tmp_path)
+    assert dp.pair_for(before[0]) is None and dp.pair_for(before[1]) and dp.pair_for(before[2])
+    pairs = [dp.pair_for(r) for r in before[1:]]
+    dp.topup("ranking", fake.client(), s, sp, tmp_path, out=lambda *_: None)
+    after = recs(sp, tmp_path)
+    assert [dp.pair_for(r) for r in after[1:]] == pairs and after[1:] == before[1:]
+    left, right = dp.pair_for(after[0])  # the topped-up bit becomes pairable, original threads keep their indices
+    assert after[0]["threads"][:3][0]["lines"] == before[0]["threads"][0]["lines"]
+    assert {left, right} <= {i for i, t in enumerate(after[0]["threads"]) if t["safe"]}

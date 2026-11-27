@@ -65,6 +65,8 @@ from sim.env import AGES, ENERGIES, VENUES  # noqa: E402
 NAME = "dpo_judge_gate"
 SEED = "dpo-pool-v1"
 RANK_SEED = "dpo-rank-v1"
+RERANK_SEED = "dpo-rerank-v1"
+RERANK_PER_CELL = 5  # 20 pairs, 10 teach and 10 test: the user's choice (2026-11-26); reported only, no bar
 RANKING_N = 240  # 120 decided pairs plus room for ties, skips and bits with fewer than 2 clean threads: judgment call, not measured
 TRAIN_N = 800  # judgment call, not measured; bounded by the free (mode, room) combinations of a first bit, see build_pool
 HALVES = ("tonight", "plain")
@@ -103,6 +105,10 @@ def _write(path: pathlib.Path, rec: dict) -> None:
 
 def _read(path: pathlib.Path) -> dict | None:
     return tc._read(path)
+
+
+def rerank_path(root: pathlib.Path) -> pathlib.Path:
+    return root / "rerank.json"
 
 
 def pool_path(root: pathlib.Path | None = None) -> pathlib.Path:
@@ -591,6 +597,94 @@ def lines_text(lines: list[str]) -> str:
     return "\n".join(f"{i}. {plain(x)}" for i, x in enumerate(lines, 1))
 
 
+# --- re-rank: your agreement with yourself ------------------------------------------------------------------------------
+
+def read_rerank(root: pathlib.Path) -> dict:
+    return _read(rerank_path(root)) or {"seed": RERANK_SEED, "answers": {}}
+
+
+def rerank_picks(pool: dict, state: dict) -> list[str]:
+    """The 20 decided pairs to ask again, by fixed seed: 5 per (role, half) cell, in a seeded mixed order."""
+    cells = {c: [] for c in CELLS}
+    for p in pool["prompts"]:
+        a = state["answers"].get(p["id"])
+        if p["split"] == "ranking" and a is not None and a["choice"] in ("1", "2"):
+            cells[(p["role"], p["half"])].append(p["id"])
+    picks = []
+    for cell in CELLS:
+        picks += random.Random(f"{RERANK_SEED}:pick:{cell[0]}:{cell[1]}").sample(sorted(cells[cell]), RERANK_PER_CELL)
+    random.Random(f"{RERANK_SEED}:order").shuffle(picks)
+    return picks
+
+
+def rerank_sides(pid: str, a: dict) -> tuple[int, int]:
+    """The same two threads with sides re-drawn by a new seed, so position cannot give the old answer away."""
+    swap = random.Random(f"{RERANK_SEED}:side:{pid}").random() < 0.5
+    return (a["right"], a["left"]) if swap else (a["left"], a["right"])
+
+
+def rerank(pool: dict, root: pathlib.Path | None = None, limit: int | None = None, read=input, out=print) -> int:
+    """Asks the 20 picked pairs again (same threads, new sides, no skip, earlier answer never shown), saving after every
+    answer into rerank.json; rank.json is never written. Returns the number answered so far."""
+    root = root or DATA
+    state = read_state(root)
+    if sum(decided(state, pool).values()) < N_PAIRS:
+        raise SystemExit(f"rank first: {counts_line(state, pool)}")
+    picks, mine = rerank_picks(pool, state), read_rerank(root)
+    mine["seed"] = RERANK_SEED
+    asked = 0
+    for pid in picks:
+        if pid in mine["answers"]:
+            continue
+        if limit is not None and asked >= limit:
+            break
+        left, right = rerank_sides(pid, state["answers"][pid])
+        rec = _read(bit_path(root, "ranking", pid))
+        out(f"\nRe-rank {len(mine['answers']) + 1} of {len(picks)}")
+        for side, i in (("1", left), ("2", right)):
+            out(f"--- {side}\n" + lines_text(rec["threads"][i]["lines"]))
+        while True:
+            a = read("Which is funnier? [1/2/t=tie/q=stop] ").strip().lower()
+            if a in ("1", "2", "t", "q"):
+                break
+        if a == "q":
+            break
+        mine["answers"][pid] = {"choice": a, "left": left, "right": right}
+        _write(rerank_path(root), mine)
+        asked += 1
+    out(f"{len(mine['answers'])} of {len(picks)} re-ranked.")
+    return len(mine["answers"])
+
+
+def self_agreement(pool: dict, state: dict, mine: dict, pairs: list[dict], letters: dict) -> dict:
+    """Reported only, no bar (set before any re-rank answer exists): of the re-ranked pairs, how many got the same pick.
+    A tie on the re-rank counts as a disagreement and is reported separately. It is a ceiling for any judge on these
+    pairs. The judge's agreement is on the test pairs among them only (teach pairs were shown to the judge)."""
+    ids = set(rerank_picks(pool, state))
+    got = {pid: a for pid, a in mine["answers"].items() if pid in ids}
+    if not got:
+        return {"status": "not run"}
+    same = ties = 0
+    for pid, a in got.items():
+        was = state["answers"][pid]
+        before = was["left"] if was["choice"] == "1" else was["right"]
+        ties += a["choice"] == "t"
+        same += a["choice"] in ("1", "2") and (a["left"] if a["choice"] == "1" else a["right"]) == before
+    w = jc.wilson(same, len(got))
+    test = [p for p in pairs if p["role"] == "test" and p["id"] in got]
+    rows = [[picked_thread(letters.get((p["id"], o)), o) for o in ORDERS] for p in test]
+    judge = None
+    if test and all(None not in r for r in rows):
+        judge = {"pairs": len(test), "agree": sum(r[0] == r[1] == p["winner"] for r, p in zip(rows, test)),
+                 "flip": sum(r[0] != r[1] for r in rows)}
+    return {"status": "done" if len(got) == len(ids) else "partial", "answered": len(got), "of": len(ids), "same": same,
+            "ties": ties, "wilson95": w and [round(x, 4) for x in w], "judge_same_pairs": judge}
+
+
+def rerank_digest(mine: dict) -> str:
+    return hashlib.sha256(json.dumps(mine["answers"], sort_keys=True).encode()).hexdigest()[:8] if mine["answers"] else ""
+
+
 # --- the gate ------------------------------------------------------------------------------------------------------------
 
 def decided_pairs(pool: dict, state: dict, root: pathlib.Path) -> list[dict]:
@@ -739,20 +833,25 @@ def answers_digest(state: dict) -> str:
     return hashlib.sha256(json.dumps(state["answers"], sort_keys=True).encode()).hexdigest()[:8]
 
 
-def params(pool: dict, state: dict, pairs: list[dict]) -> dict:
-    """The record's key: the pool, every answer (the test answers are not in the teach prompt), the teach prompt and the bar."""
+def params(pool: dict, state: dict, pairs: list[dict], root: pathlib.Path | None = None) -> dict:
+    """The record's key: the pool, every answer (the test answers are not in the teach prompt), the teach prompt and the bar,
+    plus the re-rank answers when present so the record reflects them (the gate verdict never depends on them)."""
     return {"pool_digest": pool["digest"], "rank_seed": RANK_SEED, "answers_digest": answers_digest(state),
-            "judge_digest_": judge_digest(teach_prompt(pairs)), "min_consistent": MIN_CONSISTENT}
+            "judge_digest_": judge_digest(teach_prompt(pairs)), "min_consistent": MIN_CONSISTENT,
+            "rerank_digest": rerank_digest(read_rerank(root or DATA))}
 
 
 def score(root: pathlib.Path | None = None) -> dict:
     pool, state, pairs = need_pairs(root)
     ans = state["answers"].values()
-    return summarize(pairs, read_letters(pairs, root), sum(a["choice"] == "t" for a in ans), sum(a["choice"] == "s" for a in ans))
+    letters = read_letters(pairs, root)
+    res = summarize(pairs, letters, sum(a["choice"] == "t" for a in ans), sum(a["choice"] == "s" for a in ans))
+    res["self_agreement"] = self_agreement(pool, state, read_rerank(root or DATA), pairs, letters)
+    return res
 
 
 def run(pool_digest: str = "", rank_seed: str = "", answers_digest: str = "", judge_digest_: str = "",
-        min_consistent: int = 0) -> dict:
+        min_consistent: int = 0, rerank_digest: str = "") -> dict:
     """Exp 36's record: the numbers from your answers and the judge's cached replies (the params pin which pool, which
     teach prompt and which bar they are for)."""
     return score()
@@ -776,6 +875,17 @@ def table(res: dict) -> str:
     rows.append(f"| Strict count (agrees in both orders, of all pairs) | {res['agree']} of {res['n_test']} | beside the bar |")
     rows.append(f"| Same, a disagreeing pair earning half | {res['agree_flip_half_credit']} | beside the bar |")
     rows.append(f"| Ties / skips while ranking | {res['ties']} / {res['skips']} | beside the bar |")
+    sa = res.get("self_agreement", {"status": "not run"})
+    if sa["status"] == "not run":
+        rows.append("| Your agreement with yourself (re-rank of 20) | not run | reported only |")
+    else:
+        sw = sa["wilson95"]
+        rng = "n/a" if sw is None else f"{sw[0]:.0%} to {sw[1]:.0%}"
+        rows.append(f"| Your agreement with yourself ({sa['answered']} of {sa['of']} re-ranked) | {sa['same']} of {sa['answered']} same pick, "
+                    f"likely range {rng}; {sa['ties']} ties counted as disagreements | reported only; a ceiling for any judge on these pairs |")
+        j = sa["judge_same_pairs"]
+        rows.append("| Judge on the test pairs among them | " + ("n/a" if j is None else
+                    f"{j['agree']} of {j['pairs']} agree in both orders, {j['flip']} with the orders disagreeing") + " | reported only |")
     rows.append(f"| Verdict | {res['verdict']} | the bar |")
     return "\n".join(rows)
 
@@ -784,10 +894,10 @@ def table(res: dict) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("command", choices=("pool", "write", "topup", "rank", "judge", "score"))
+    ap.add_argument("command", choices=("pool", "write", "topup", "rank", "rerank", "judge", "score"))
     ap.add_argument("--split", choices=("ranking", "train"), help="write: which split; pool --rebuild --split train rebuilds only the training split")
     ap.add_argument("--n", type=int, help="write: stop after this many new bits")
-    ap.add_argument("--limit", type=int, help="rank: ask at most this many questions this sitting")
+    ap.add_argument("--limit", type=int, help="rank, rerank: ask at most this many questions this sitting")
     ap.add_argument("--rebuild", action="store_true", help="pool: replace the frozen pool (invalidates every written bit)")
     ap.add_argument("--tonight-dir", help="pool: where the stored `sim.tonight fetch` folders are (default data/tonight)")
     ap.add_argument("--record", action="store_true", help="score: save the result as the Exp 36 record")
@@ -836,6 +946,15 @@ def main() -> None:
             raise SystemExit("run `python -m sim.dpo_pairs pool` first")
         try:
             rank(pool, limit=a.limit)
+        except (KeyboardInterrupt, EOFError):
+            print("\nstopped; every answer so far is saved.")
+        return
+    if a.command == "rerank":
+        pool = _read(pool_path())
+        if pool is None:
+            raise SystemExit("run `python -m sim.dpo_pairs pool` first")
+        try:
+            rerank(pool, limit=a.limit)
         except (KeyboardInterrupt, EOFError):
             print("\nstopped; every answer so far is saved.")
         return

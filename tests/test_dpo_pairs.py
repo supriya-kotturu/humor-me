@@ -793,3 +793,131 @@ def test_a_pair_already_shown_is_the_same_after_topup(pool, tmp_path):
     left, right = dp.pair_for(after[0])  # the topped-up bit becomes pairable, original threads keep their indices
     assert after[0]["threads"][:3][0]["lines"] == before[0]["threads"][0]["lines"]
     assert {left, right} <= {i for i, t in enumerate(after[0]["threads"]) if t["safe"]}
+
+
+# --- the re-rank (self-agreement, reported only) -------------------------------------------------------------------------
+
+def ranked(pool, root, answer="1"):
+    """A root with every ranking bit written, the pool saved and 120 decided pairs, all answered `answer`."""
+    fake_bits(pool, root)
+    dp._write(dp.pool_path(root), pool)
+    dp.rank(pool, root, read=scripted(*[answer] * 400), out=lambda *_: None)
+    return dp.read_state(root)
+
+
+def asked_about(out):
+    return [t for t in out if t.startswith("--- ")]
+
+
+def test_rerank_refuses_before_120_pairs_are_decided(pool, tmp_path):
+    fake_bits(pool, tmp_path)
+    dp.rank(pool, tmp_path, limit=5, read=scripted(*["1"] * 5), out=lambda *_: None)
+    with pytest.raises(SystemExit, match="rank first"):
+        dp.rerank(pool, tmp_path, read=scripted("1"), out=lambda *_: None)
+    assert not dp.rerank_path(tmp_path).exists()
+
+
+def test_rerank_picks_5_per_cell_10_teach_10_test_by_fixed_seed(pool, tmp_path):
+    state = ranked(pool, tmp_path)
+    picks = dp.rerank_picks(pool, state)
+    cell = {p["id"]: (p["role"], p["half"]) for p in pool["prompts"]}
+    assert len(picks) == len(set(picks)) == 20
+    assert collections.Counter(cell[i] for i in picks) == {c: 5 for c in dp.CELLS}
+    assert collections.Counter(cell[i][0] for i in picks) == {"teach": 10, "test": 10}
+    assert picks == dp.rerank_picks(pool, state)
+    assert all(state["answers"][i]["choice"] in ("1", "2") for i in picks)
+
+
+def test_rerank_shows_the_same_two_threads_with_sides_redrawn_by_seed(pool, tmp_path):
+    state = ranked(pool, tmp_path)
+    sides = {pid: dp.rerank_sides(pid, state["answers"][pid]) for pid in dp.rerank_picks(pool, state)}
+    assert sides == {pid: dp.rerank_sides(pid, state["answers"][pid]) for pid in sides}
+    swapped = [sides[pid] == (state["answers"][pid]["right"], state["answers"][pid]["left"]) for pid in sides]
+    assert any(swapped) and not all(swapped)
+    assert all(set(sides[pid]) == {state["answers"][pid]["left"], state["answers"][pid]["right"]} for pid in sides)
+
+
+def test_rerank_asks_20_with_no_skip_never_shows_the_old_answer_and_leaves_rank_json_alone(pool, tmp_path):
+    state = ranked(pool, tmp_path)
+    before = dp.rank_path(tmp_path).read_bytes()
+    out, prompts = [], []
+
+    def read(prompt):
+        prompts.append(prompt)
+        return "1" if len(prompts) % 5 else "s"  # an "s" is refused and asked again
+
+    assert dp.rerank(pool, tmp_path, read=read, out=out.append) == 20
+    assert dp.rank_path(tmp_path).read_bytes() == before
+    mine = dp.read_rerank(tmp_path)
+    assert set(mine["answers"]) == set(dp.rerank_picks(pool, state)) and all(a["choice"] == "1" for a in mine["answers"].values())
+    assert all("s=skip" not in p and "t=tie" in p for p in prompts) and len(prompts) > 20
+    assert len(asked_about(out)) == 40
+    assert not any("earlier" in t.lower() or "before" in t.lower() for t in out)
+
+
+def test_rerank_is_resumable_limited_and_saved_after_every_answer(pool, tmp_path):
+    ranked(pool, tmp_path)
+    dp.rerank(pool, tmp_path, limit=7, read=scripted(*["2"] * 20), out=lambda *_: None)
+    first = dp.read_rerank(tmp_path)["answers"]
+    assert len(first) == 7
+    dp.rerank(pool, tmp_path, read=scripted("1", "1", "q"), out=lambda *_: None)  # quit saves what was answered
+    second = dp.read_rerank(tmp_path)["answers"]
+    assert len(second) == 9 and all(second[k] == v for k, v in first.items())
+    out = []
+    assert dp.rerank(pool, tmp_path, read=scripted(*["1"] * 20), out=out.append) == 20
+    assert len(asked_about(out)) == 2 * 11 and all(dp.read_rerank(tmp_path)["answers"][k] == v for k, v in second.items())
+
+
+def rerank_with(pool, root, state, choose):
+    """Fills rerank.json: choose(pid, original_pick_side_in_new_layout) -> '1', '2' or 't'."""
+    answers = {}
+    for pid in dp.rerank_picks(pool, state):
+        was = state["answers"][pid]
+        old = was["left"] if was["choice"] == "1" else was["right"]
+        left, right = dp.rerank_sides(pid, was)
+        answers[pid] = {"choice": choose(pid, "1" if left == old else "2"), "left": left, "right": right}
+    dp._write(dp.rerank_path(root), {"seed": dp.RERANK_SEED, "answers": answers})
+
+
+def test_self_agreement_counts_same_picks_ties_as_disagreements_and_the_judge_on_test_pairs(pool, tmp_path):
+    state = ranked(pool, tmp_path)
+    pairs = dp.decided_pairs(pool, state, tmp_path)
+    letters = {}
+    for p in pairs:
+        if p["role"] == "test":
+            w = p["winner"]
+            letters[(p["id"], "ab")], letters[(p["id"], "ba")] = ("A", "B") if w == 0 else ("B", "A")
+    picks = dp.rerank_picks(pool, state)
+    ties = set(picks[:3])
+    flipped = set(picks[3:7])
+
+    def choose(pid, same_side):
+        return "t" if pid in ties else ({"1": "2", "2": "1"}[same_side] if pid in flipped else same_side)
+
+    rerank_with(pool, tmp_path, state, choose)
+    res = dp.self_agreement(pool, state, dp.read_rerank(tmp_path), pairs, letters)
+    assert (res["status"], res["answered"], res["same"], res["ties"]) == ("done", 20, 13, 3)
+    assert res["wilson95"] == [round(x, 4) for x in dp.jc.wilson(13, 20)]
+    assert res["judge_same_pairs"] == {"pairs": 10, "agree": 10, "flip": 0}
+
+
+def test_self_agreement_is_not_run_without_rerank_json_and_score_says_so(pool, tmp_path):
+    ranked(pool, tmp_path)
+    res = dp.score(tmp_path)
+    assert res["self_agreement"] == {"status": "not run"}
+    assert "| not run |" in dp.table(res) and "re-rank of 20" in dp.table(res)
+
+
+def test_the_gate_verdict_and_its_numbers_do_not_depend_on_the_rerank(pool, tmp_path):
+    state = ranked(pool, tmp_path)
+    without = dp.score(tmp_path)
+    p0 = dp.params(pool, state, dp.decided_pairs(pool, state, tmp_path), tmp_path)
+    assert p0["rerank_digest"] == ""
+    rerank_with(pool, tmp_path, state, lambda pid, same: "t")
+    with_ = dp.score(tmp_path)
+    assert with_["self_agreement"]["same"] == 0 and with_["self_agreement"]["ties"] == 20
+    assert {k: v for k, v in with_.items() if k != "self_agreement"} == {k: v for k, v in without.items() if k != "self_agreement"}
+    p1 = dp.params(pool, state, dp.decided_pairs(pool, state, tmp_path), tmp_path)
+    assert p1["rerank_digest"] != "" and {k: v for k, v in p1.items() if k != "rerank_digest"} == {k: v for k, v in p0.items() if k != "rerank_digest"}
+    assert set(p1) == set(dp.run.__code__.co_varnames[:dp.run.__code__.co_argcount])
+    assert "Your agreement with yourself (20 of 20 re-ranked)" in dp.table(with_)

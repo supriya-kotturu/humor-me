@@ -12,6 +12,7 @@ shares the one GPU and the show's 12 s bit deadline would suffer):
     python -m sim.dpo_pairs rank [--limit 20]                 # you pick the funnier thread of a pair, in sittings
     python -m sim.dpo_pairs judge --env-file backend/.env     # the gate: 120 calls (60 test pairs, both orders)
     python -m sim.dpo_pairs score --record                    # numbers -> reports/metrics/dpo_judge_gate.json
+    python -m sim.dpo_pairs pool --split train --rebuild      # later, with 3+ days stored, before any judge labelling
 
 Prompts. `pool` writes `data/dpo/pool.json` once (gitignored, it holds headline gists): a seeded pool of bit requests built the
 way the live show builds them (`ThreadGenerator`, gen-v5, material off, tonight's context on for half). Two disjoint
@@ -29,10 +30,12 @@ Ranking. Each ranking prompt is assigned to teach or test now, by seed, before a
 or s (skip). Ties and skips are not counted and the prompt is replaced by the next one of its cell, so you end with 120
 decided pairs; both counts are recorded.
 
-Gate (D-102, set before any data). The judge is taught with the 60 teach pairs as examples and asked on each of the 60 test
-pairs in both orders. A pair agrees only when the judge picks your thread in both orders (a pair where the two orders
-disagree is a miss). Pass: at least 38 of 60 agree, i.e. the Wilson 95% lower bound clears 50%. Beside the bar, no bar:
-agreement by tonight half, and the share of pairs whose two orders disagree. Generated text lives only under `data/dpo/`.
+Gate (D-102's bar, D-121's rule for pairs the judge answers inconsistently; both set before any data). The judge is taught
+with the 60 teach pairs as examples and asked on each of the 60 test pairs in both orders. A pair whose two orders name
+different threads gets no label (and is dropped from DPO later). On the consistent pairs: let c be how many there are and a
+how many agree with you. Pass iff c >= 30 (at least half of 60) AND the Wilson 95% lower bound of a/c is above 50%.
+Reported: a, c, the share of pairs whose orders disagree, agreement per tonight half; the strict count (a of 60) and
+the half-credit rate are beside it, never deciding. Generated text lives only under `data/dpo/`.
 """
 import argparse
 import datetime
@@ -67,7 +70,7 @@ CELLS = tuple((r, h) for h in HALVES for r in ROLES)
 PER_CELL = 30
 N_PAIRS = PER_CELL * len(CELLS)  # 120
 N_TEST = PER_CELL * len(HALVES)  # 60
-BAR_AGREE = 38  # D-102: of 60 test pairs; the Wilson 95% lower bound first clears 50% here (a test pins it)
+MIN_CONSISTENT = N_TEST // 2  # D-121: the gate needs at least half of the 60 test pairs answered the same way in both orders
 BITS_PER_SHOW = 8
 MAX_TOLD = tc.MAX_TOLD
 DATA = ROOT / "data" / "dpo"
@@ -152,9 +155,11 @@ def prompt_key(p: dict) -> tuple:
             p["bit"] if p["half"] == "tonight" else None, p["gist"])
 
 
-def build_pool(days: list[dict], n_ranking: int = RANKING_N, n_train: int = TRAIN_N, seed: str = SEED) -> dict:
+def build_pool(days: list[dict], n_ranking: int = RANKING_N, n_train: int = TRAIN_N, seed: str = SEED,
+               keep_ranking: list[dict] | None = None) -> dict:
     """The frozen prompt pool. Split, half, role, mode, bit and gist are fixed by position and seed; only a room that would
-    repeat an earlier prompt is redrawn. Raises when a half cannot be built (no approved gist, no free room)."""
+    repeat an earlier prompt is redrawn. Raises when a half cannot be built (no approved gist, no free room).
+    `keep_ranking` (a frozen ranking split) builds only the training split around it, disjoint from it."""
     if not days or not any(d["approved"] for d in days):
         raise SystemExit("no approved gists under data/tonight: the tonight half needs `python -m sim.tonight fetch` output "
                          "(junction data/tonight from the checkout that has it)")
@@ -163,9 +168,10 @@ def build_pool(days: list[dict], n_ranking: int = RANKING_N, n_train: int = TRAI
     headline = 0  # next gist: round-robin over the shuffled list
     taken = earlier_keys()
     modes = tuple(generate.MODES)
-    prompts: list[dict] = []
+    prompts: list[dict] = [dict(p) for p in keep_ranking or []]
+    taken |= {prompt_key(p) for p in prompts}
     bumped = 0
-    for split, n in (("ranking", n_ranking), ("train", n_train)):
+    for split, n in (("train", n_train),) if keep_ranking else (("ranking", n_ranking), ("train", n_train)):
         if n % (2 * len(ROLES) if split == "ranking" else 2):
             raise ValueError(f"{split} size {n} must split evenly into halves" + (" and roles" if split == "ranking" else ""))
         cells = {h: 0 for h in HALVES}
@@ -200,7 +206,7 @@ def build_pool(days: list[dict], n_ranking: int = RANKING_N, n_train: int = TRAI
             taken.add(prompt_key(p))
             prompts.append(p)
     # Roles: per tonight half, half of the ranking prompts teach and half test, shuffled once now, before any answer.
-    for half in HALVES:
+    for half in () if keep_ranking else HALVES:
         mine = [p for p in prompts if p["split"] == "ranking" and p["half"] == half]
         random.Random(f"{RANK_SEED}:roles:{half}").shuffle(mine)
         for j, p in enumerate(mine):
@@ -241,6 +247,31 @@ def ensure_pool(root: pathlib.Path | None = None, tonight_dir: pathlib.Path | No
         return existing
     pool = build_pool(load_days(tonight_dir))
     _write(path, pool)
+    return pool
+
+
+def rebuild_train(root: pathlib.Path | None = None, tonight_dir: pathlib.Path | None = None) -> dict:
+    """Rebuilds only the training split, from the days now stored (more days, D-121), around the frozen ranking split.
+    Refuses once any training bit has been labelled (`data/dpo/labels/`). Training bits written for the old split are moved
+    aside, not deleted: their ids now name other prompts. The ranking prompts' days must be unchanged."""
+    root = root or DATA
+    old = _read(pool_path(root))
+    if old is None:
+        raise SystemExit("no pool yet: run `python -m sim.dpo_pairs pool` first")
+    labels = root / "labels"
+    if labels.exists() and any(labels.iterdir()):
+        raise SystemExit("training bits are already labelled (data/dpo/labels): the training split is frozen")
+    days = load_days(tonight_dir)
+    now = {d["date"]: d for d in days}
+    ranking = [p for p in old["prompts"] if p["split"] == "ranking"]
+    for d in old["days"]:
+        if any(p["day"] == d["date"] for p in ranking) and now.get(d["date"]) != d:
+            raise SystemExit(f"the stored fetch for {d['date']} is missing or changed: the ranking split was written with it")
+    pool = build_pool(days, keep_ranking=ranking)
+    bits = root / "bits" / "train"
+    if bits.exists():
+        bits.rename(bits.with_name(f"train.before-{old['digest']}"))
+    _write(pool_path(root), pool)
     return pool
 
 
@@ -530,20 +561,31 @@ def summarize(pairs: list[dict], letters: dict[tuple[str, str], str | None], tie
     def by(half: str) -> dict:
         mine = [r for r in rows if r["half"] == half]
         return {"pairs": len(mine), "agree": sum(r["agree"] for r in mine),
+                "consistent": sum(r["complete"] and not r["flip"] for r in mine),
                 "flip_rate": rate(sum(r["flip"] for r in mine), sum(r["complete"] for r in mine))}
 
     singles = [x for r in rows for x in r["order_agree"]]
+    cons = [r for r in rows if r["complete"] and not r["flip"]]
+    c, a_ = len(cons), sum(r["agree"] for r in cons)
+    wc = jc.wilson(a_, c)
     if n != N_TEST or missing:
         verdict = "incomplete"
     else:
-        verdict = "pass" if agree >= BAR_AGREE and w[0] > 0.5 else "fail"
-    return {"verdict": verdict, "n_test": n, "agree": agree, "bar": BAR_AGREE, "wilson95": w and [round(x, 4) for x in w],
+        verdict = "pass" if passes(a_, c) else "fail"
+    return {"verdict": verdict, "n_test": n, "consistent": c, "agree_consistent": a_, "min_consistent": MIN_CONSISTENT,
+            "wilson95": wc and [round(x, 4) for x in wc],
+            "agree": agree, "wilson95_strict": w and [round(x, 4) for x in w],
             "missing_pairs": missing, "flip_rate": rate(sum(r["flip"] for r in rows), n - missing),
-            # D-95's convention (a judge tie earns half), beside the bar: the strict count above is what decides
+            # beside the bar, never deciding: D-95's convention (a judge tie earns half), the strict count above, one order
             "agree_flip_half_credit": rate(2 * agree + sum(r["flip"] for r in rows), 2 * n),
             "agree_single_order": rate(sum(singles), len(singles)),
             "by_half": {h: by(h) for h in HALVES}, "ties": ties, "skips": skips,
             "judge": {"provider": tc.judge_model()[0], "model": tc.judge_model()[1], "teach_pairs": sum(p["role"] == "teach" for p in pairs)}}
+
+
+def passes(a: int, c: int) -> bool:
+    """D-121's gate: enough pairs answered consistently, and among them the Wilson 95% lower bound of agreement above 50%."""
+    return c >= MIN_CONSISTENT and jc.wilson(a, c)[0] > 0.5
 
 
 def rate(k: int, n: int) -> float | None:
@@ -564,7 +606,7 @@ def need_pairs(root: pathlib.Path | None = None) -> tuple[dict, dict, list[dict]
 
 def params(pool: dict, pairs: list[dict]) -> dict:
     return {"pool_digest": pool["digest"], "rank_seed": RANK_SEED, "judge_digest_": judge_digest(teach_prompt(pairs)),
-            "bar_agree": BAR_AGREE}
+            "min_consistent": MIN_CONSISTENT}
 
 
 def score(root: pathlib.Path | None = None) -> dict:
@@ -573,7 +615,7 @@ def score(root: pathlib.Path | None = None) -> dict:
     return summarize(pairs, read_letters(pairs, root), sum(a["choice"] == "t" for a in ans), sum(a["choice"] == "s" for a in ans))
 
 
-def run(pool_digest: str = "", rank_seed: str = "", judge_digest_: str = "", bar_agree: int = 0) -> dict:
+def run(pool_digest: str = "", rank_seed: str = "", judge_digest_: str = "", min_consistent: int = 0) -> dict:
     """Exp 36's record: the numbers from your answers and the judge's cached replies (the params pin which pool, which
     teach prompt and which bar they are for)."""
     return score()
@@ -588,11 +630,13 @@ def stored() -> dict | None:
 def table(res: dict) -> str:
     w = res["wilson95"]
     rows = ["| Check | Result | Bar |", "|---|---|---|",
-            f"| Test pairs where the judge picks your thread in both orders | {res['agree']} of {res['n_test']} | at least {res['bar']} |",
-            f"| Likely range (Wilson 95%) | {'n/a' if w is None else f'{w[0]:.0%} to {w[1]:.0%}'} | lower end above 50% |",
+            f"| Test pairs the judge answered the same way in both orders (c) | {res['consistent']} of {res['n_test']} | at least {res['min_consistent']} |",
+            f"| Of those, the judge picks your thread (a) | {res['agree_consistent']} of {res['consistent']} | lower end of the range above 50% |",
+            f"| Likely range of a / c (Wilson 95%) | {'n/a' if w is None else f'{w[0]:.0%} to {w[1]:.0%}'} | lower end above 50% |",
             f"| Pairs where the two orders disagree | {res['flip_rate']} | beside the bar |"]
     for h, v in res["by_half"].items():
-        rows.append(f"| Agreement, {h} half | {v['agree']} of {v['pairs']} | beside the bar |")
+        rows.append(f"| {h} half: consistent, agreeing | {v['consistent']} of {v['pairs']}, {v['agree']} | beside the bar |")
+    rows.append(f"| Strict count (agrees in both orders, of all pairs) | {res['agree']} of {res['n_test']} | beside the bar |")
     rows.append(f"| Same, a disagreeing pair earning half | {res['agree_flip_half_credit']} | beside the bar |")
     rows.append(f"| Ties / skips while ranking | {res['ties']} / {res['skips']} | beside the bar |")
     rows.append(f"| Verdict | {res['verdict']} | the bar |")
@@ -604,7 +648,7 @@ def table(res: dict) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("command", choices=("pool", "write", "rank", "judge", "score"))
-    ap.add_argument("--split", choices=("ranking", "train"), help="write: which split")
+    ap.add_argument("--split", choices=("ranking", "train"), help="write: which split; pool --rebuild --split train rebuilds only the training split")
     ap.add_argument("--n", type=int, help="write: stop after this many new bits")
     ap.add_argument("--limit", type=int, help="rank: ask at most this many questions this sitting")
     ap.add_argument("--rebuild", action="store_true", help="pool: replace the frozen pool (invalidates every written bit)")
@@ -620,6 +664,10 @@ def main() -> None:
     os.environ.setdefault("JOKE_WRITER_PROVIDER", "ollama")
     tonight_dir = pathlib.Path(a.tonight_dir) if a.tonight_dir else None
     if a.command == "pool":
+        if a.rebuild and a.split == "train":
+            pool = rebuild_train(tonight_dir=tonight_dir)
+            print(f"pool {pool['digest']}: {json.dumps(sizes(pool))}; tonight days: {[d['date'] for d in pool['days']]}")
+            return
         if a.rebuild and DATA.joinpath("bits").exists():
             raise SystemExit("bits are already written for this pool: move data/dpo aside before rebuilding")
         pool = ensure_pool(tonight_dir=tonight_dir, rebuild=a.rebuild)

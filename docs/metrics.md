@@ -1078,17 +1078,20 @@ Decision: [D-121](agent/decisions-detail.md#d-121), which carries out [D-102](ag
 
 **Status: pending. You rank 120 pairs and run the judge; nothing is recorded yet.**
 
-What it tests: DPO needs thousands of "which bit is funnier" labels, and only a judge can give that many. First it has to agree with you on bits of one request written by the same model, which are closer than the cross-model ballot of Exp 24. You rank 120 pairs. 60 teach the judge your taste, and 60 are held back as the test.
+What it tests: DPO needs thousands of "which bit is funnier" labels, and only a judge can give that many. First it has to agree with you on bits of one request written by the same model, which are closer than the cross-model ballot of Exp 24. You rank 120 pairs. 60 teach the judge your taste, and 60 are held back as the test. The judge is Claude Haiku 5.5, your choice.
 
-**The bar (set before any data):** on the 60 test pairs the judge picks your bit, in both orders of showing, at least 38 times. At 38 the likely range of its agreement first stays above 50%. If the two orders disagree, the pair counts as a miss.
+**The bar (set before any data):** the judge sees each test pair in both orders. A pair it answers differently in the two orders gets no label (and is dropped from DPO too). It passes if it answers at least 30 of the 60 the same way, and among those its agreement with you has a likely range above 50%. The least that clears: 21 of 30, 30 of 45, 38 of 60.
 
-Prompts: 240 for ranking and 800 for training, half with tonight's context and half without, none repeating an earlier experiment's prompt. One day of headlines only (21 approved summaries), so the tonight half leans on a few stories.
+Chance of passing, if the judge is right this often in each order and its two orders err independently: 50%: 1.4%. 65%: 74%. 70%: 91%. 75%: 98%.
 
-Also reported, with no bar: agreement for each half, how often the two orders disagree, agreement in a single order, and your ties and skips.
+Prompts: 240 for ranking and 800 for training, half with tonight's context and half without, none repeating an earlier experiment's prompt. One day of headlines only (21 approved summaries), so the training pool is rebuilt with 3 or more days before the judge labels it.
+
+Also reported, with no bar: how often the two orders disagree, agreement for each half, the count over all 60 pairs (a no-label pair counts as a miss), the rate if a no-label pair earned half, and your ties and skips.
 
 | Check | Result | Bar |
 |---|---|---|
-| Test pairs where the judge picks your bit in both orders | pending | at least 38 of 60 |
+| Test pairs answered the same way in both orders | pending | at least 30 of 60 |
+| Of those, the judge picks your bit | pending | likely range above 50% |
 | Pairs where the two orders disagree | pending | beside the bar |
 | Agreement, tonight half / plain half | pending | beside the bar |
 | Verdict | pending | the bar |
@@ -1096,6 +1099,6 @@ Also reported, with no bar: agreement for each half, how often the two orders di
 How to run it: the commands are at the end of D-121.
 
 Caveats:
-- If the judge fails, it may be position bias rather than wrong taste: a judge right 75% of the time in each order, with independent mistakes, agrees in both only about 56% of the time. The disagreement share is reported for that reason.
-- The judge is Claude Haiku 5.5, not the Qwen judge D-102 named (never run). The rewritten judge of D-114 only checks that lines connect.
+- The Qwen judge D-102 named was never built, and the rewritten judge of D-114 only checks that lines connect, so this is the first judge of pairs.
+- A judge that favours one position loses pairs to "no label", so a fail may mean position bias; the disagreement share is reported for that.
 - Whether the judge stays right as DPO changes the model is not checked.

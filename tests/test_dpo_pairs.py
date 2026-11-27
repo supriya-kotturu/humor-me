@@ -401,11 +401,12 @@ def fake_pairs(n_test_right_first=60):
 
 
 class FakeJudge:
-    """Picks the bit that carries the WIN marker in the first `right` pairs and the other one in the rest; `positional`
-    always says A; a pair numbered in `down` fails (an outage)."""
+    """Pairs numbered below `right` get the bit with the WIN marker, pairs from `right` up to `consistent` get the other
+    bit (both consistent in the two orders); pairs from `consistent` up always get A, so the two orders disagree.
+    `positional` makes every pair do that; a pair numbered in `down` fails (an outage)."""
 
-    def __init__(self, right=60, positional=False, down=()):
-        self.right, self.positional, self.down, self.calls = right, positional, set(down), []
+    def __init__(self, right=60, consistent=60, positional=False, down=()):
+        self.right, self.consistent, self.positional, self.down, self.calls = right, consistent, positional, set(down), []
 
     def chat(self, system, user, *, json_reply=False, temperature=0.0, validate=None, deadline_s=None):
         self.calls.append((system, user))
@@ -413,7 +414,7 @@ class FakeJudge:
         pair_no = int(a_block.split("test ")[1].split(" ")[0])
         if pair_no in self.down:
             raise llm.LLMError("down")
-        if self.positional:
+        if self.positional or pair_no >= self.consistent:
             return json.dumps({"funnier": "A"})
         return json.dumps({"funnier": "A" if ("WIN" in a_block) == (pair_no < self.right) else "B"})
 
@@ -453,23 +454,31 @@ def test_test_pairs_are_never_in_the_teach_prompt_and_every_teach_pair_is(tmp_pa
 
 def test_a_judge_that_always_agrees_passes_with_no_flips(tmp_path):
     _, res = judged(tmp_path, fake_pairs())
-    assert (res["verdict"], res["agree"], res["flip_rate"], res["agree_single_order"]) == ("pass", 60, 0.0, 1.0)
+    assert (res["verdict"], res["agree"], res["consistent"], res["flip_rate"], res["agree_single_order"]) == ("pass", 60, 60, 0.0, 1.0)
     assert res["by_half"]["tonight"]["agree"] == 30 and res["by_half"]["plain"]["agree"] == 30
 
 
-@pytest.mark.parametrize("right,verdict", [(38, "pass"), (37, "fail"), (60, "pass"), (0, "fail")])
-def test_the_bar_is_38_of_60_with_the_edge_at_37_and_38(tmp_path, right, verdict):
-    _, res = judged(tmp_path, fake_pairs(), right=right)
-    assert (res["agree"], res["verdict"]) == (right, verdict)
+# c = pairs answered the same way in both orders, a = those agreeing with you. The minimum a that clears the Wilson
+# lower bound above one half is 21 of 30, 38 of 60 (computed with jc.wilson).
+@pytest.mark.parametrize("c,a,verdict", [(29, 29, "fail"), (30, 21, "pass"), (30, 20, "fail"), (30, 30, "pass"),
+                                         (45, 30, "pass"), (60, 38, "pass"), (60, 37, "fail"), (60, 60, "pass"), (60, 0, "fail"),
+                                         (0, 0, "fail")])
+def test_the_gate_needs_30_consistent_pairs_and_a_lower_bound_above_half_among_them(tmp_path, c, a, verdict):
+    _, res = judged(tmp_path, fake_pairs(), right=a, consistent=c)
+    assert (res["consistent"], res["agree_consistent"], res["verdict"]) == (c, a, verdict)
+    assert res["agree"] == a  # the strict count over all 60 is the same a: pairs without a label never agree
 
 
-def test_the_bar_matches_the_wilson_lower_bound_of_one_half():
-    assert jc.wilson(dp.BAR_AGREE, 60)[0] > 0.5 and jc.wilson(dp.BAR_AGREE - 1, 60)[0] <= 0.5
+def test_the_minimum_agreeing_pairs_are_the_computed_ones():
+    mins = {c: next(a for a in range(c + 1) if jc.wilson(a, c)[0] > 0.5) for c in (30, 45, 60)}
+    assert mins == {30: 21, 45: 30, 60: 38}
+    assert all(dp.passes(mins[c], c) and not dp.passes(mins[c] - 1, c) for c in mins)
+    assert not dp.passes(29, 29) and dp.MIN_CONSISTENT == 30  # coverage fails first, whatever the agreement
 
 
-def test_a_positional_judge_flips_and_never_agrees_in_both_orders(tmp_path):
+def test_a_positional_judge_flips_and_gets_no_label(tmp_path):
     _, res = judged(tmp_path, fake_pairs(), positional=True)
-    assert res["agree"] == 0 and res["flip_rate"] == 1.0 and res["verdict"] == "fail"
+    assert res["agree"] == 0 and res["consistent"] == 0 and res["flip_rate"] == 1.0 and res["verdict"] == "fail"
     assert res["agree_single_order"] == 0.5  # always A is right in half of the orders: position, not taste
 
 
@@ -489,7 +498,7 @@ def test_a_missing_call_makes_the_gate_incomplete_not_a_fail(tmp_path):
     assert len(again.calls) == 2 and dp.summarize(pairs, dp.read_letters(pairs, tmp_path))["verdict"] == "pass"
 
 
-def test_a_pair_whose_two_orders_disagree_counts_as_a_miss():
+def test_a_pair_whose_two_orders_disagree_gets_no_label_and_is_not_counted_either_way():
     pairs = [p for p in fake_pairs() if p["role"] == "test"]
     letters = {}
     for p in pairs:
@@ -498,7 +507,7 @@ def test_a_pair_whose_two_orders_disagree_counts_as_a_miss():
         letters[(p["id"], "ba")] = "A" if w == 0 else "B"  # same letter in the swapped order: the other thread
     pairs += [p for p in fake_pairs() if p["role"] == "teach"]
     res = dp.summarize(pairs, letters)
-    assert res["agree"] == 0 and res["flip_rate"] == 1.0 and res["agree_single_order"] == 0.5
+    assert res["agree"] == 0 and res["consistent"] == 0 and res["flip_rate"] == 1.0 and res["agree_single_order"] == 0.5
     assert res["agree_flip_half_credit"] == 0.5  # D-95's convention, reported beside the bar and never deciding
 
 
@@ -519,3 +528,60 @@ def test_the_record_stores_numbers_only(tmp_path, monkeypatch, pool):
     text = (tmp_path / f"{dp.NAME}.json").read_text()
     assert "line" not in text and "WIN" not in text
     assert json.loads(text)["results"]["verdict"] == "pass"
+
+
+# --- rebuilding only the training split ----------------------------------------------------------------------------------
+
+def put_fetch(directory, date, n_gists=3):
+    gists = [f"{date} gist {i}" for i in range(n_gists)]
+    dp._write(directory / date / "fetch.json", {"date": date, "fetched_at": date, "approved": gists, "market": {"line": f"up on {date}"},
+                                                  "facts": [], "keep": {}, "people": {}})
+
+
+def frozen(tmp_path):
+    fetches, root = tmp_path / "tonight", tmp_path / "dpo"
+    put_fetch(fetches, "2026-11-26")
+    pool = dp.build_pool(dp.load_days(fetches))
+    dp._write(dp.pool_path(root), pool)
+    return fetches, root, pool
+
+
+def test_rebuilding_the_training_split_keeps_the_ranking_split_and_stays_disjoint(tmp_path):
+    fetches, root, old = frozen(tmp_path)
+    put_fetch(fetches, "2026-11-27")
+    put_fetch(fetches, "2026-11-28")
+    new = dp.rebuild_train(root, fetches)
+    pick = lambda pool, split: [p for p in pool["prompts"] if p["split"] == split]  # noqa: E731
+    assert pick(new, "ranking") == pick(old, "ranking")  # roles, gists and rooms are untouched
+    assert pick(new, "train") != pick(old, "train") and len(pick(new, "train")) == dp.TRAIN_N
+    assert [d["date"] for d in new["days"]] == ["2026-11-26", "2026-11-27", "2026-11-28"]
+    assert {p["day"] for p in pick(new, "train") if p["gist"]} == {"2026-11-26", "2026-11-27", "2026-11-28"}
+    dp.assert_disjoint(new)  # still disjoint from the ranking split and Exp 24, 26, 27, 30
+    assert dp._read(dp.pool_path(root)) == new
+
+
+def test_old_training_bits_are_moved_aside_not_deleted_on_a_rebuild(tmp_path):
+    fetches, root, old = frozen(tmp_path)
+    dp._write(dp.bit_path(root, "train", "t0000"), {"id": "t0000"})
+    put_fetch(fetches, "2026-11-27")
+    dp.rebuild_train(root, fetches)
+    assert not (root / "bits" / "train").exists()
+    assert dp._read(root / "bits" / f"train.before-{old['digest']}" / "t0000.json") == {"id": "t0000"}
+
+
+def test_a_labelled_training_split_cannot_be_rebuilt(tmp_path):
+    fetches, root, old = frozen(tmp_path)
+    dp._write(root / "labels" / "t0000.json", {"label": 1})
+    put_fetch(fetches, "2026-11-27")
+    with pytest.raises(SystemExit, match="already labelled"):
+        dp.rebuild_train(root, fetches)
+    assert dp._read(dp.pool_path(root)) == old
+
+
+def test_a_rebuild_refuses_when_a_day_the_ranking_split_used_is_gone_or_changed(tmp_path):
+    fetches, root, old = frozen(tmp_path)
+    dp._write(fetches / "2026-11-26" / "fetch.json", {"date": "2026-11-26", "fetched_at": "later", "approved": ["other"],
+                                                       "market": {"line": "changed"}, "facts": [], "keep": {}, "people": {}})
+    with pytest.raises(SystemExit, match="missing or changed"):
+        dp.rebuild_train(root, fetches)
+    assert dp._read(dp.pool_path(root)) == old

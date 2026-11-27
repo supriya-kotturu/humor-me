@@ -252,3 +252,6 @@ data/material/
 
 # Tonight's context (D-119): the day's fetched headlines and Exp 35's generated text and answers; local only
 data/tonight/
+
+# Exp 36 (D-121): pair pool, written bits, your ranking answers and the judge replies; headline gists and joke text
+data/dpo/

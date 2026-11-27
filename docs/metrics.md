@@ -1071,3 +1071,31 @@ Same decision and pairs design, run on HEAD 14f7bd0 (places, checked organisatio
 - The first run's name count used the old meaning (D-120), so the two filter results are not comparable.
 - No public figure was approved that day, so none of the 10 new bits named one; the public-figure rule is covered by the filter check only.
 
+
+## Does the judge agree with you on same-writer pairs? (Exp 36, pending)
+
+Decision: [D-121](agent/decisions-detail.md#d-121), which carries out [D-102](agent/decisions-detail.md#d-102). Raw: `reports/metrics/dpo_judge_gate.json` (written by `score --record` after you run it). Code: `sim/dpo_pairs.py`.
+
+**Status: pending. You rank 120 pairs and run the judge; nothing is recorded yet.**
+
+What it tests: DPO needs thousands of "which bit is funnier" labels, and only a judge can give that many. First it has to agree with you on bits of one request written by the same model, which are closer than the cross-model ballot of Exp 24. You rank 120 pairs. 60 teach the judge your taste, and 60 are held back as the test.
+
+**The bar (set before any data):** on the 60 test pairs the judge picks your bit, in both orders of showing, at least 38 times. At 38 the likely range of its agreement first stays above 50%. If the two orders disagree, the pair counts as a miss.
+
+Prompts: 240 for ranking and 800 for training, half with tonight's context and half without, none repeating an earlier experiment's prompt. One day of headlines only (21 approved summaries), so the tonight half leans on a few stories.
+
+Also reported, with no bar: agreement for each half, how often the two orders disagree, agreement in a single order, and your ties and skips.
+
+| Check | Result | Bar |
+|---|---|---|
+| Test pairs where the judge picks your bit in both orders | pending | at least 38 of 60 |
+| Pairs where the two orders disagree | pending | beside the bar |
+| Agreement, tonight half / plain half | pending | beside the bar |
+| Verdict | pending | the bar |
+
+How to run it: the commands are at the end of D-121.
+
+Caveats:
+- If the judge fails, it may be position bias rather than wrong taste: a judge right 75% of the time in each order, with independent mistakes, agrees in both only about 56% of the time. The disagreement share is reported for that reason.
+- The judge is Claude Haiku 5.5, not the Qwen judge D-102 named (never run). The rewritten judge of D-114 only checks that lines connect.
+- Whether the judge stays right as DPO changes the model is not checked.

@@ -23,12 +23,14 @@ No prompt equals one of Exp 24's ballot or of Exp 26, 27 or 30 (`assert_disjoint
 approved in `sim.tonight fetch`; with few days of them a gist is reused by several prompts (round-robin, seeded).
 
 Writing. One prompt is one bit is 3 parallel calls on the live writer, then the show's safety check on every line. A thread
-with any rejected line is kept in the record (`safe: false`) and never enters a pair. One bit at a time.
+with any rejected line is kept in the record (`safe: false`) and never enters a pair. One bit at a time. A bit with no
+thread is written again on the next run, and three in a row stop the writer (Ollama is down).
 
 Ranking. Each ranking prompt is assigned to teach or test now, by seed, before any answer: per tonight half, 30 teach and
-30 test pairs (30 in each of 4 cells). One pair per prompt: two clean threads of the bit, sides random. Answer 1, 2, t (tie)
-or s (skip). Ties and skips are not counted and the prompt is replaced by the next one of its cell, so you end with 120
-decided pairs; both counts are recorded.
+30 test pairs (30 in each of 4 cells); prompts sharing a headline gist share a role. One pair per prompt: two clean
+threads of the bit, sides random. Answer 1, 2, t (tie) or s (skip). Ties and skips are not counted and the prompt is
+replaced by the next one of its cell, so you end with 120 decided pairs; both counts are recorded. Neither the order of
+questions nor the progress line tells you which pairs are test.
 
 Gate (D-102's bar, D-121's rule for pairs the judge answers inconsistently; both set before any data). The judge is taught
 with the 60 teach pairs as examples and asked on each of the 60 test pairs in both orders. A pair whose two orders name
@@ -150,9 +152,10 @@ def earlier_keys() -> set[tuple]:
 
 
 def prompt_key(p: dict) -> tuple:
+    """What the request is made of. The bit number is not in it: it reaches the request only through the premises told
+    and, for the tonight half, whether a gist is the topic; the tonight half's background is its day's."""
     c = p["context"]
-    return (p["mode"], c["venue"], c["energy"], c["age"], tuple(p["told"]), p["half"],
-            p["bit"] if p["half"] == "tonight" else None, p["gist"])
+    return (p["mode"], c["venue"], c["energy"], c["age"], tuple(p["told"]), p["half"], p["day"], p["gist"])
 
 
 def build_pool(days: list[dict], n_ranking: int = RANKING_N, n_train: int = TRAIN_N, seed: str = SEED,
@@ -206,11 +209,21 @@ def build_pool(days: list[dict], n_ranking: int = RANKING_N, n_train: int = TRAI
             taken.add(prompt_key(p))
             prompts.append(p)
     # Roles: per tonight half, half of the ranking prompts teach and half test, shuffled once now, before any answer.
+    # Prompts sharing a headline gist go to one side together, so no test pair has a teach example's topic.
     for half in () if keep_ranking else HALVES:
         mine = [p for p in prompts if p["split"] == "ranking" and p["half"] == half]
         random.Random(f"{RANK_SEED}:roles:{half}").shuffle(mine)
-        for j, p in enumerate(mine):
-            p["role"] = ROLES[j % 2]
+        groups: dict[str, list[dict]] = {}
+        for p in mine:
+            groups.setdefault(p["gist"] or p["id"], []).append(p)
+        count = dict.fromkeys(ROLES, 0)
+        for group in sorted(groups.values(), key=len, reverse=True):  # stable: shuffled order among equal sizes
+            role = min(ROLES, key=lambda r: (count[r], ROLES.index(r)))
+            for p in group:
+                p["role"] = role
+            count[role] += len(group)
+        if len(set(count.values())) != 1:
+            raise SystemExit(f"ranking roles do not split evenly in the {half} half: {count}")
     pool = {"seed": seed, "rank_seed": RANK_SEED, "days": days, "bumped_first_bits": bumped, "prompts": prompts}
     assert_disjoint(pool)
     pool["digest"] = pool_digest(pool)
@@ -253,7 +266,8 @@ def ensure_pool(root: pathlib.Path | None = None, tonight_dir: pathlib.Path | No
 def rebuild_train(root: pathlib.Path | None = None, tonight_dir: pathlib.Path | None = None) -> dict:
     """Rebuilds only the training split, from the days now stored (more days, D-121), around the frozen ranking split.
     Refuses once any training bit has been labelled (`data/dpo/labels/`). Training bits written for the old split are moved
-    aside, not deleted: their ids now name other prompts. The ranking prompts' days must be unchanged."""
+    aside, not deleted (their ids may now name other prompts); a bit whose prompt and day are unchanged is kept. The
+    ranking prompts' days must be unchanged. Stop any `write --split train` first."""
     root = root or DATA
     old = _read(pool_path(root))
     if old is None:
@@ -270,7 +284,23 @@ def rebuild_train(root: pathlib.Path | None = None, tonight_dir: pathlib.Path | 
     pool = build_pool(days, keep_ranking=ranking)
     bits = root / "bits" / "train"
     if bits.exists():
-        bits.rename(bits.with_name(f"train.before-{old['digest']}"))
+        aside = bits.with_name(f"train.before-{old['digest']}")
+        k = 1
+        while aside.exists():
+            k += 1
+            aside = bits.with_name(f"train.before-{old['digest']}-{k}")
+        bits.rename(aside)
+        # A prompt the rebuild left unchanged (the whole plain half, and tonight prompts of an unchanged day) keeps its bit.
+        before = {p["id"]: p for p in old["prompts"] if p["split"] == "train"}
+        old_days = {d["date"]: d for d in old["days"]}
+        for p in (q for q in pool["prompts"] if q["split"] == "train"):
+            src = aside / f"{p['id']}.json"
+            if before.get(p["id"]) != p or (p["day"] is not None and old_days.get(p["day"]) != now.get(p["day"])):
+                continue
+            if same_prompt(_read(src), p):
+                dest = bit_path(root, "train", p["id"])
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                src.replace(dest)
     _write(pool_path(root), pool)
     return pool
 
@@ -281,16 +311,30 @@ def sizes(pool: dict) -> dict:
 
 # --- writing -------------------------------------------------------------------------------------------------------------
 
+def tonight_for(prompt: dict, days: dict[str, dict]):
+    """The show's context for a tonight prompt (its gist first, so `draw` gives it on a headline bit), None for plain."""
+    if prompt["half"] != "tonight":
+        return None
+    day = days[prompt["day"]]
+    gists = ([prompt["gist"]] if prompt["gist"] else []) + [g for g in day["approved"] if g != prompt["gist"]]
+    return app_tonight.TonightContext(day["facts"], day["market"], gists, allowed_names=day["names"], allowed_people=day["people"])
+
+
 def new_generator(client, prompt: dict, days: dict[str, dict]):
     """The generator a show would hold when it reaches this bit: live prompt, material off, premises told, and for the tonight
-    half the day's context with the prompt's gist first, so `draw` gives it on a headline bit and nothing on the others."""
+    half the day's context."""
     gen = generate.ThreadGenerator(client, prompt_id=generate.PROMPT_ID, told=prompt["told"])
-    if prompt["half"] == "tonight":
-        day = days[prompt["day"]]
-        gists = ([prompt["gist"]] if prompt["gist"] else []) + [g for g in day["approved"] if g != prompt["gist"]]
-        gen.set_tonight(app_tonight.TonightContext(day["facts"], day["market"], gists, allowed_names=day["names"],
-                                                   allowed_people=day["people"]))
+    if (t := tonight_for(prompt, days)) is not None:
+        gen.set_tonight(t)
     return gen
+
+
+def set_allow(live_safety, prompt: dict, days: dict[str, dict]) -> None:
+    """One LiveSafety serves the whole split, so its allow lists are set for every bit: the day's for a tonight bit, none
+    for a plain one (a plain bit after a tonight bit would otherwise pass names a plain show rejects)."""
+    t = tonight_for(prompt, days)
+    live_safety.allow_caps = t.allow_caps if t else frozenset()
+    live_safety.allow_people = t.allow_people if t else frozenset()
 
 
 def request_digest(request: str, generator_id: str) -> str:
@@ -314,9 +358,7 @@ def check_threads(threads: list[dict], live_safety, age: str) -> bool:
 
 def write_bit(client, live_safety, prompt: dict, days: dict[str, dict]) -> dict:
     gen = new_generator(client, prompt, days)
-    if prompt["half"] == "tonight":
-        live_safety.allow_caps = gen.tonight.allow_caps
-        live_safety.allow_people = gen.tonight.allow_people
+    set_allow(live_safety, prompt, days)
     bad0 = client.bad_replies
     start = time.perf_counter()
     rec = {"id": prompt["id"], "split": prompt["split"], "half": prompt["half"], "mode": prompt["mode"], "bit": prompt["bit"],
@@ -347,35 +389,55 @@ def finish(rec: dict, live_safety, age: str) -> dict:
     return rec
 
 
+PROMPT_FIELDS = ("split", "half", "mode", "bit", "context", "told", "day", "gist")
+MAX_EMPTY_IN_A_ROW = 3  # judgment call, not measured: three bits with no thread in a row is an outage, not bad luck
+
+
 def done(rec: dict | None) -> bool:
-    return rec is not None and not rec.get("safety_infra_error")
+    """Written for good: threads came back and the safety layer gave a verdict. A bit with no thread is retried."""
+    return rec is not None and bool(rec.get("threads")) and not rec.get("safety_infra_error")
+
+
+def same_prompt(rec: dict | None, p: dict) -> bool:
+    """The record was written for this prompt, not for another pool's prompt with the same id (a rebuild while a writer ran)."""
+    return rec is not None and all(rec.get(k) == p[k] for k in PROMPT_FIELDS)
 
 
 def write(split: str, client, live_safety, pool: dict, root: pathlib.Path | None = None, n: int | None = None,
           out=print) -> int:
     """Writes the missing bits of a split, one at a time, in pool order; a bit whose safety layer failed is re-checked, not
-    regenerated. Stops after `n` new bits (None: all). Returns how many it wrote."""
+    regenerated, and a bit with no thread is written again. Stops after `n` new bits (None: all), or when
+    MAX_EMPTY_IN_A_ROW bits in a row return no thread (the writer is down). Returns how many it wrote."""
     root = root or DATA
     days = {d["date"]: d for d in pool["days"]}
     mine = [p for p in pool["prompts"] if p["split"] == split]
     total = len(mine)
-    wrote = 0
+    ready = sum(done(r) and same_prompt(r, p) for p in mine if (r := _read(bit_path(root, split, p["id"]))) is not None)
+    wrote = empty = 0
     for i, p in enumerate(mine, 1):
         path = bit_path(root, split, p["id"])
         rec = _read(path)
+        if not same_prompt(rec, p):
+            rec = None
         if done(rec):
             continue
         if n is not None and wrote >= n:
             break
-        if rec is not None:  # only the safety layer failed: redo it on the stored threads
+        set_allow(live_safety, p, days)
+        if rec is not None and rec["threads"]:  # only the safety layer failed: redo it on the stored threads
             rec = finish(rec, live_safety, p["context"]["age"])
         else:
             rec = write_bit(client, live_safety, p, days)
         _write(path, rec)
         wrote += 1
+        ready += done(rec)
         clean = sum(t["safe"] for t in rec["threads"])
         out(f"[{i}/{total}] {p['id']} {p['mode']} {p['half']} bit {p['bit']}: {len(rec['threads'])} threads, {clean} clean, "
-            f"{rec['wall_s']:.1f} s ({sum(done(_read(bit_path(root, split, q['id']))) for q in mine)} of {total} done)")
+            f"{rec['wall_s']:.1f} s ({ready} of {total} done)")
+        empty = 0 if rec["threads"] else empty + 1
+        if empty >= MAX_EMPTY_IN_A_ROW:
+            raise SystemExit(f"{empty} bits in a row came back with no thread (last: {rec['lost'][-1:]}): is Ollama up? "
+                             "Finished bits are saved; rerun to resume")
     return wrote
 
 
@@ -407,10 +469,14 @@ def decided(state: dict, pool: dict | None = None) -> dict[tuple, int]:
 
 
 def next_pair(pool: dict, state: dict, root: pathlib.Path) -> tuple[dict, dict, tuple[int, int]] | None:
-    """The next prompt to ask about: from the cell with the fewest decided pairs (so a sitting stays balanced), the first
-    unanswered prompt of its pool order whose bit is written and has two clean threads."""
+    """The next prompt to ask about: from a cell with the fewest decided pairs (so a sitting stays balanced; among equal
+    cells a seeded draw, so the order of questions does not tell you which are test pairs), the first unanswered prompt
+    of its pool order whose bit is written and has two clean threads."""
     counts = decided(state, pool)
-    for cell in sorted((c for c in CELLS if counts[c] < PER_CELL), key=lambda c: (counts[c], CELLS.index(c))):
+    r = random.Random(f"{RANK_SEED}:next:{len(state['answers'])}")
+    open_cells = [c for c in CELLS if counts[c] < PER_CELL]
+    draws = {c: r.random() for c in open_cells}
+    for cell in sorted(open_cells, key=lambda c: (counts[c], draws[c])):
         for p in pool["prompts"]:
             if p["split"] != "ranking" or (p["role"], p["half"]) != cell or p["id"] in state["answers"]:
                 continue
@@ -421,9 +487,9 @@ def next_pair(pool: dict, state: dict, root: pathlib.Path) -> tuple[dict, dict, 
 
 
 def counts_line(state: dict, pool: dict) -> str:
+    """The progress you see while ranking: no teach / test split, which would tell you which questions are test pairs."""
     d, ans = decided(state, pool), state["answers"].values()
-    return (f"{sum(d.values())} of {N_PAIRS} done (teach {d[('teach', 'tonight')] + d[('teach', 'plain')]} of {N_TEST}, "
-            f"test {d[('test', 'tonight')] + d[('test', 'plain')]} of {N_TEST}; ties {sum(a['choice'] == 't' for a in ans)}, "
+    return (f"{sum(d.values())} of {N_PAIRS} done (ties {sum(a['choice'] == 't' for a in ans)}, "
             f"skips {sum(a['choice'] == 's' for a in ans)})")
 
 
@@ -604,9 +670,14 @@ def need_pairs(root: pathlib.Path | None = None) -> tuple[dict, dict, list[dict]
     return pool, state, pairs
 
 
-def params(pool: dict, pairs: list[dict]) -> dict:
-    return {"pool_digest": pool["digest"], "rank_seed": RANK_SEED, "judge_digest_": judge_digest(teach_prompt(pairs)),
-            "min_consistent": MIN_CONSISTENT}
+def answers_digest(state: dict) -> str:
+    return hashlib.sha256(json.dumps(state["answers"], sort_keys=True).encode()).hexdigest()[:8]
+
+
+def params(pool: dict, state: dict, pairs: list[dict]) -> dict:
+    """The record's key: the pool, every answer (the test answers are not in the teach prompt), the teach prompt and the bar."""
+    return {"pool_digest": pool["digest"], "rank_seed": RANK_SEED, "answers_digest": answers_digest(state),
+            "judge_digest_": judge_digest(teach_prompt(pairs)), "min_consistent": MIN_CONSISTENT}
 
 
 def score(root: pathlib.Path | None = None) -> dict:
@@ -615,7 +686,8 @@ def score(root: pathlib.Path | None = None) -> dict:
     return summarize(pairs, read_letters(pairs, root), sum(a["choice"] == "t" for a in ans), sum(a["choice"] == "s" for a in ans))
 
 
-def run(pool_digest: str = "", rank_seed: str = "", judge_digest_: str = "", min_consistent: int = 0) -> dict:
+def run(pool_digest: str = "", rank_seed: str = "", answers_digest: str = "", judge_digest_: str = "",
+        min_consistent: int = 0) -> dict:
     """Exp 36's record: the numbers from your answers and the judge's cached replies (the params pin which pool, which
     teach prompt and which bar they are for)."""
     return score()
@@ -706,7 +778,7 @@ def main() -> None:
         return
     res = score()
     if a.record:
-        res = cache.run_or_load(NAME, run, rerun=True, **params(pool, pairs))
+        res = cache.run_or_load(NAME, run, rerun=True, **params(pool, state, pairs))
     print(table(res), flush=True)
 
 

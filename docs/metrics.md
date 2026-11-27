@@ -1102,3 +1102,4 @@ Caveats:
 - The Qwen judge D-102 named was never built, and the rewritten judge of D-114 only checks that lines connect, so this is the first judge of pairs.
 - A judge that favours one position loses pairs to "no label", so a fail may mean position bias; the disagreement share is reported for that.
 - Whether the judge stays right as DPO changes the model is not checked.
+- The test only covers pairs where you had a pick. Pairs you tie or skip are left out, so how the judge does on pairs you find equal is not measured.

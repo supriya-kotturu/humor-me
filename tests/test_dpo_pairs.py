@@ -111,6 +111,27 @@ def test_a_prompt_equal_to_an_earlier_experiments_is_caught(pool):
         dp.assert_disjoint(bad)
 
 
+def test_an_identical_tonight_request_at_another_bit_number_is_caught(pool):
+    # Bits 4 to 7 all have 4 premises told and, off the headline bits, the same request: the bit number is not in it.
+    bad = json.loads(json.dumps(pool))
+    r = next(p for p in bad["prompts"] if p["split"] == "ranking" and p["half"] == "tonight" and p["bit"] == 4)
+    t = next(p for p in bad["prompts"] if p["split"] == "train" and p["half"] == "tonight" and p["bit"] == 5)
+    t.update(mode=r["mode"], context=dict(r["context"]), told=list(r["told"]))
+    with pytest.raises(AssertionError, match="ranking prompt equals a train prompt"):
+        dp.assert_disjoint(bad)
+
+
+def test_no_headline_gist_is_in_both_a_teach_and_a_test_prompt():
+    many = dp.build_pool([day(gists=[f"gist {i}" for i in range(21)])])  # as stored: 21 gists for 30 headline prompts
+    roles = collections.defaultdict(set)
+    for p in many["prompts"]:
+        if p["split"] == "ranking" and p["gist"]:
+            roles[p["gist"]].add(p["role"])
+    shared = [g for g in roles if sum(q["gist"] == g for q in many["prompts"] if q["split"] == "ranking") > 1]
+    assert shared and all(len(r) == 1 for r in roles.values())
+    assert all(sum(p["split"] == "ranking" and (p["role"], p["half"]) == c for p in many["prompts"]) == 60 for c in dp.CELLS)
+
+
 def test_sizes_halves_roles_and_coverage(pool):
     assert dp.sizes(pool) == {"ranking/tonight": 120, "ranking/plain": 120, "train/tonight": 400, "train/plain": 400}
     ranking = [p for p in pool["prompts"] if p["split"] == "ranking"]
@@ -278,7 +299,32 @@ def test_a_bit_with_no_thread_is_recorded_as_a_failure_not_a_crash(pool, tmp_pat
     sp = small_pool(pool, 1)
     assert dp.write("ranking", client, FakeSafety(), sp, tmp_path, out=lambda *_: None) == 1
     rec = dp._read(dp.bit_path(tmp_path, "ranking", sp["prompts"][0]["id"]))
-    assert rec["threads"] == [] and rec["failure"] and rec["lost"]
+    assert rec["threads"] == [] and rec["failure"] and rec["lost"] and not dp.done(rec)
+    # the next run writes it again rather than counting it as finished
+    fake = FakeOllama()
+    assert dp.write("ranking", fake.client(), FakeSafety(), sp, tmp_path, out=lambda *_: None) == 1 and len(fake.seen) == 3
+    assert dp.done(dp._read(dp.bit_path(tmp_path, "ranking", sp["prompts"][0]["id"])))
+
+
+def test_the_writer_stops_when_bits_keep_coming_back_empty(pool, tmp_path):
+    def down(request):
+        raise httpx.ConnectError("refused")
+    client = llm.Client("http://local/v1", "", "bonsai-2:4b", 10.0, local=True, transport=httpx.MockTransport(down),
+                        sleep=lambda s: None)
+    sp = small_pool(pool, 6)
+    with pytest.raises(SystemExit, match="3 bits in a row"):
+        dp.write("ranking", client, FakeSafety(), sp, tmp_path, out=lambda *_: None)
+    assert len(list((tmp_path / "bits" / "ranking").iterdir())) == 3  # recorded, and retried on the next run
+
+
+def test_a_record_written_for_another_prompt_with_the_same_id_is_written_again(pool, tmp_path):
+    sp = small_pool(pool, 1)
+    p = sp["prompts"][0]
+    dp.write("ranking", FakeOllama().client(), FakeSafety(), sp, tmp_path, out=lambda *_: None)
+    moved = {**sp, "prompts": [{**p, "context": {**p["context"], "venue": "elsewhere"}}]}
+    fake = FakeOllama()
+    assert dp.write("ranking", fake.client(), FakeSafety(), moved, tmp_path, out=lambda *_: None) == 1 and len(fake.seen) == 3
+    assert dp._read(dp.bit_path(tmp_path, "ranking", p["id"]))["context"]["venue"] == "elsewhere"
 
 
 def test_when_only_the_safety_layer_failed_the_rerun_rechecks_without_regenerating(pool, tmp_path):
@@ -301,6 +347,25 @@ def test_the_tonight_half_sets_the_days_allow_lists_on_the_safety_check(pool, tm
     s = FakeSafety()
     dp.write_bit(FakeOllama().client(), s, prompt, {prompt["day"]: d})
     assert s.allow_people == frozenset({"Jane Roe"}) and "Thanksgiving" in s.allow_caps
+    # one safety check serves the whole split: a plain bit after a tonight bit allows nothing again
+    plain = next(p for p in pool["prompts"] if p["half"] == "plain")
+    dp.write_bit(FakeOllama().client(), s, plain, {prompt["day"]: d})
+    assert s.allow_people == frozenset() and s.allow_caps == frozenset()
+
+
+def test_a_tonight_bit_rechecked_after_a_safety_outage_gets_its_days_allow_lists(pool, tmp_path):
+    d = day(people=["Jane Roe"])
+    prompts = [next(p for p in pool["prompts"] if p["split"] == "ranking" and p["half"] == h) for h in ("tonight", "plain")]
+    sp = {**pool, "days": [d], "prompts": prompts}
+    dp.write("ranking", FakeOllama().client(), FakeSafety(fail=True), sp, tmp_path, out=lambda *_: None)
+    seen = []
+
+    class Watch(FakeSafety):
+        def check(self, text, age):
+            seen.append(self.allow_people)
+            return super().check(text, age)
+    dp.write("ranking", FakeOllama().client(), Watch(), sp, tmp_path, out=lambda *_: None)
+    assert seen[:15] == [frozenset({"Jane Roe"})] * 15 and seen[15:] == [frozenset()] * 15
 
 
 # --- the ranking tool ----------------------------------------------------------------------------------------------------
@@ -318,7 +383,7 @@ def test_ties_and_skips_are_replaced_so_120_decided_pairs_split_30_in_every_cell
     state = dp.read_state(tmp_path)
     assert dp.decided(state, pool) == {c: 30 for c in dp.CELLS}
     assert sum(a["choice"] in "12" for a in state["answers"].values()) == 120
-    assert out[-1].startswith("120 of 120 done (teach 60 of 60, test 60 of 60; ties ")
+    assert out[-1].startswith("120 of 120 done (ties ") and "teach" not in out[-1] and "test" not in out[-1]
     ties = sum(a["choice"] == "t" for a in state["answers"].values())
     skips = sum(a["choice"] == "s" for a in state["answers"].values())
     assert ties > 0 and skips > 0 and f"ties {ties}, skips {skips})" in out[-1]
@@ -347,6 +412,16 @@ def test_a_sitting_is_resumable_limited_and_saved_after_every_answer(pool, tmp_p
     first20 = dp.read_state(tmp_path)["answers"]
     roles = {p["id"]: (p["role"], p["half"]) for p in pool["prompts"] if p["split"] == "ranking"}
     assert collections.Counter(roles[i] for i in list(first20)[:20]) == {c: 5 for c in dp.CELLS}
+
+
+def test_the_order_of_questions_does_not_give_away_which_are_test_pairs(pool, tmp_path):
+    fake_bits(pool, tmp_path)
+    sitting(pool, tmp_path, ["1"] * 40)
+    roles = {p["id"]: (p["role"], p["half"]) for p in pool["prompts"] if p["split"] == "ranking"}
+    cells = [roles[i] for i in dp.read_state(tmp_path)["answers"]]
+    blocks = [cells[k:k + 4] for k in range(0, 40, 4)]
+    assert all(sorted(b) == sorted(dp.CELLS) for b in blocks)  # still balanced: one of each cell every 4 questions
+    assert len({tuple(b) for b in blocks}) > 1  # but not in a fixed order, so position says nothing about the role
 
 
 def test_teach_and_test_are_fixed_before_any_answer_and_do_not_depend_on_answers(pool, tmp_path):
@@ -520,10 +595,20 @@ def test_the_judge_cache_follows_the_teach_prompt(tmp_path):
     assert dp.read_letters(changed, tmp_path)[("test00", "ab")] is None  # nothing is reused for a different teach prompt
 
 
+def test_the_record_key_changes_when_any_answer_changes(pool):
+    state = {"seed": dp.RANK_SEED, "answers": {"r0001": {"choice": "1", "left": 0, "right": 1}}}
+    pairs = fake_pairs()
+    key = dp.params(pool, state, pairs)
+    flipped = {**state, "answers": {"r0001": {"choice": "2", "left": 0, "right": 1}}}
+    assert dp.params(pool, flipped, pairs)["answers_digest"] != key["answers_digest"]
+    assert set(key) == set(dp.run.__code__.co_varnames[:dp.run.__code__.co_argcount])
+
+
 def test_the_record_stores_numbers_only(tmp_path, monkeypatch, pool):
     monkeypatch.setattr(dp.cache, "METRICS", tmp_path)
     _, res = judged(tmp_path, fake_pairs())
-    saved = dp.cache.run_or_load(dp.NAME, lambda **_: res, rerun=True, pool_digest="x", rank_seed=dp.RANK_SEED, judge_digest_="y", bar_agree=38)
+    saved = dp.cache.run_or_load(dp.NAME, lambda **_: res, rerun=True, pool_digest="x", rank_seed=dp.RANK_SEED,
+                                 answers_digest="z", judge_digest_="y", min_consistent=dp.MIN_CONSISTENT)
     assert saved == res
     text = (tmp_path / f"{dp.NAME}.json").read_text()
     assert "line" not in text and "WIN" not in text
@@ -567,6 +652,26 @@ def test_old_training_bits_are_moved_aside_not_deleted_on_a_rebuild(tmp_path):
     dp.rebuild_train(root, fetches)
     assert not (root / "bits" / "train").exists()
     assert dp._read(root / "bits" / f"train.before-{old['digest']}" / "t0000.json") == {"id": "t0000"}
+
+
+def test_a_rebuild_keeps_the_bits_of_prompts_it_left_unchanged(tmp_path):
+    fetches, root, old = frozen(tmp_path)
+    train = [p for p in old["prompts"] if p["split"] == "train"]
+    plain = next(p for p in train if p["half"] == "plain")
+    tonight = next(p for p in train if p["half"] == "tonight" and p["gist"])
+    for p in (plain, tonight):
+        dp._write(dp.bit_path(root, "train", p["id"]), {**{k: p[k] for k in dp.PROMPT_FIELDS}, "id": p["id"], "threads": []})
+    put_fetch(fetches, "2026-11-27")
+    new = dp.rebuild_train(root, fetches)
+    assert next(p for p in new["prompts"] if p["id"] == plain["id"]) == plain
+    assert dp._read(dp.bit_path(root, "train", plain["id"]))["id"] == plain["id"]  # the plain half is unchanged: kept
+    assert next(p for p in new["prompts"] if p["id"] == tonight["id"]) != tonight
+    assert dp._read(dp.bit_path(root, "train", tonight["id"])) is None  # its gist moved with the new days: set aside
+    # a second rebuild never overwrites the first one's set-aside bits
+    dp._write(dp.bit_path(root, "train", "t9999"), {"id": "t9999"})
+    put_fetch(fetches, "2026-11-28")
+    dp.rebuild_train(root, fetches)
+    assert len([d for d in (root / "bits").iterdir() if d.name.startswith("train.before-")]) == 2
 
 
 def test_a_labelled_training_split_cannot_be_rebuilt(tmp_path):

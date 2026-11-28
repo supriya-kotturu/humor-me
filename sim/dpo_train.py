@@ -25,11 +25,19 @@ import itertools
 import json
 import pathlib
 import random
+import re
 
 from sim import dpo_pairs as dp
 from sim.env import AGES, ENERGIES, VENUES
 
 from app import generate, llm  # noqa: E402 - sim.dpo_pairs has put backend/ on the path
+
+try:
+    from app.safety import JSON_FRAGMENT  # noqa: E402 - PR #91's `format:json_fragment` rule
+except ImportError:
+    # Exact copy of that pattern until #91 merges (D-125); tests/test_dpo_train.py asserts the two agree once both exist.
+    JSON_FRAGMENT = re.compile(r'[{}]|\\"|"\s*(?:premise|jokes)\s*"?\s*:|(?:premise|jokes)\s*"\s*:|\bjson\b|thought trace', re.I)
+CURLY = str.maketrans({"’": "'", "‘": "'", "“": '"', "”": '"'})  # the rule is read on straightened quotes
 
 MAX_THREADS_PER_BIT = 3  # the first three clean threads: up to 3 pairs a bit (user's brief)
 FAIL_STOP = 8  # calls that fail in a row: an outage, not bad luck (judgment call, not measured)
@@ -65,6 +73,11 @@ def thread_pairs(rec: dict) -> list[tuple[int, int]]:
     # slots: a pair already labelled is never displaced, and a bit with 3 original clean threads gains nothing.
     clean = ([i for i in clean if not ts[i].get("reflag")] + [i for i in clean if ts[i].get("reflag")])[:MAX_THREADS_PER_BIT]
     return [tuple(sorted(c)) for c in itertools.combinations(clean, 2)]
+
+
+def garbled(thread: dict) -> bool:
+    """A line of a broken JSON reply (`premise":`, `']}`) would teach the writer to emit broken JSON, whatever its label (D-123)."""
+    return any(JSON_FRAGMENT.search(str(line).translate(CURLY)) for line in thread.get("lines", []))
 
 
 def written_bits(split: str, writer: str, pool: dict, root: pathlib.Path) -> list[tuple[dict, dict]]:
@@ -257,9 +270,12 @@ def best_thread(scores: dict[int, list[int]]) -> int | None:
     return ranked[0][0] if ranked and ranked[0][1][0] > 0 else None
 
 
-def export_b(rows: list[dict], bits: dict[str, dict]) -> tuple[list[dict], list[dict], dict]:
+def export_b(rows: list[dict], bits: dict[str, dict], stats: dict | None = None) -> tuple[list[dict], list[dict], dict]:
     """(sft rows, dpo rows, counts) for writer B from the labels. A thread with no stored reply cannot be a target: its rows are
-    skipped and counted."""
+    skipped and counted. A garbled thread is in no pair and no SFT row; `stats` collects what was dropped. An SFT row whose winner
+    is garbled takes the next-best clean thread by the same rule, and is dropped only when none has a win."""
+    stats = stats if stats is not None else {}
+    bad_threads = stats.setdefault("threads", set())
     sft, dpo = [], []
     no_raw = same = 0
     for r in rows:
@@ -267,6 +283,10 @@ def export_b(rows: list[dict], bits: dict[str, dict]) -> tuple[list[dict], list[
             continue
         rec = bits[r["bit"]]
         win, lose = (rec["threads"][k] for k in (r["winner"], r["j"] if r["winner"] == r["i"] else r["i"]))
+        if garbled(win) or garbled(lose):
+            bad_threads.update((r["bit"], k) for k in (r["i"], r["j"]) if garbled(rec["threads"][k]))
+            stats["pairs"] = stats.get("pairs", 0) + 1
+            continue
         if reply_text(win) is None or reply_text(lose) is None:
             no_raw += 1
             continue
@@ -277,6 +297,9 @@ def export_b(rows: list[dict], bits: dict[str, dict]) -> tuple[list[dict], list[
                     "rejected": reply_text(lose)})
     for bit, scores in thread_scores(rows).items():
         k = best_thread(scores)
+        if k is not None and garbled(bits[bit]["threads"][k]):
+            stats["sft"] = stats.get("sft", 0) + 1
+            k = best_thread({t: v for t, v in scores.items() if not garbled(bits[bit]["threads"][t])})
         if k is None:
             continue
         if reply_text(bits[bit]["threads"][k]) is None:
@@ -286,9 +309,11 @@ def export_b(rows: list[dict], bits: dict[str, dict]) -> tuple[list[dict], list[
     return sft, dpo, {"sft": len(sft), "dpo": len(dpo), "skipped_no_reply": no_raw, "skipped_identical": same}
 
 
-def export_c(pool: dict, state: dict, root: pathlib.Path) -> tuple[list[dict], dict]:
+def export_c(pool: dict, state: dict, root: pathlib.Path, stats: dict | None = None) -> tuple[list[dict], dict]:
     """The user's decided ranking pairs as DPO rows: chosen is the thread they picked. The bits are bonsai's (off-policy for a
     qwen3 base, D-123) and carry no stored reply, so both replies are `canonical_reply` of the parsed thread."""
+    stats = stats if stats is not None else {}
+    bad_threads = stats.setdefault("threads", set())
     rows, ties = [], 0
     for p in pool["prompts"]:
         a = state["answers"].get(p["id"])
@@ -300,6 +325,10 @@ def export_c(pool: dict, state: dict, root: pathlib.Path) -> tuple[list[dict], d
         rec = dp._read(dp.bit_path(root, "ranking", p["id"]))
         win, lose = (a["left"], a["right"]) if a["choice"] == "1" else (a["right"], a["left"])
         t = rec["threads"]
+        if garbled(t[win]) or garbled(t[lose]):
+            bad_threads.update((p["id"], k) for k in (win, lose) if garbled(t[k]))
+            stats["pairs"] = stats.get("pairs", 0) + 1
+            continue
         rows.append({"id": p["id"], "role": p["role"], "half": p["half"], "prompt": split_request(rec["request"]),
                      "chosen": reply_text(t[win]) or canonical_reply(t[win]), "rejected": reply_text(t[lose]) or canonical_reply(t[lose])})
     return rows, {"dpo": len(rows), "ties_left_out": ties}
@@ -379,8 +408,9 @@ def export(writer: str, root: pathlib.Path | None = None, split: str = "train", 
     if summary["missing"]:
         raise SystemExit(f"{summary['missing']} pairs are not labelled yet: rerun `label` until none is missing")
     bits = {p["id"]: rec for p, rec in written_bits(split, writer, pool, root)}
-    sft, dpo_b, counts_b = export_b(rows, bits)
-    dpo_c, counts_c = export_c(pool, state, root)
+    stats_b, stats_c = {}, {}
+    sft, dpo_b, counts_b = export_b(rows, bits, stats_b)
+    dpo_c, counts_c = export_c(pool, state, root, stats_c)
     eval_prompts = build_eval_prompts(pool)
     assert_eval_disjoint(eval_prompts, pool)
     d = root / TRAIN_DIR
@@ -393,9 +423,13 @@ def export(writer: str, root: pathlib.Path | None = None, split: str = "train", 
             if t.get("safe"):
                 k = (t.get("reflag") or {}).get("rules") or dp.thread_rules(b, t) or "unknown"
                 safe_by_rules[k] = safe_by_rules.get(k, 0) + 1
+    garbled_safe = sum(garbled(t) for b in bits.values() for t in b["threads"] if t.get("safe"))
     from_reflag = sum(any(bits[r["bit"]]["threads"][k].get("reflag") for k in (r["i"], r["j"])) for r in rows if r["bit"] in bits)
     manifest = {"writer": writer, "safe_threads_by_rules": dict(sorted(safe_by_rules.items())),
                 "pairs_from_reflagged_threads": from_reflag, "pairs_total": len(rows), "pool_digest": pool["digest"], "rank_answers_digest": dp.answers_digest(state),
+                "dropped_garbled_threads": {"B": len(stats_b["threads"]), "C": len(stats_c["threads"]), "safe_in_pool": garbled_safe},
+                "dropped_garbled_pairs": {"B": stats_b.get("pairs", 0), "C": stats_c.get("pairs", 0)},
+                "sft_dropped_garbled": stats_b.get("sft", 0),
                 "labels_digest": sha(path), "labels": summary, "sft_rule": RULE_SFT, "B": counts_b, "C": counts_c,
                 "eval_prompts": len(eval_prompts), "eval_seed": EVAL_SEED,
                 "files": {name: {"rows": len(data), "sha8": sha(d / name)} for name, data in files.items()},

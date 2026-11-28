@@ -590,3 +590,69 @@ def test_the_manifest_counts_threads_by_rules_and_pairs_from_reflagged_threads(p
     m = dt.export(QWEN, stale, out=lambda *_: None)
     assert m["safe_threads_by_rules"] == {"rules-v3": 7, "rules-v4": 5} and m["pairs_total"] == 9 and m["pairs_from_reflagged_threads"] == 3
     assert old_ids <= {r["id"] for r in dt.read_jsonl(stale / "train" / "dpo_B.jsonl")}
+
+
+# --- garbled threads (D-123, D-125) --------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("line", ['premise":', "and then it crashed.']}", 'He said \\"hi\\"', "{ jokes", "see the JSON", "thought trace: x"])
+def test_garbled_catches_broken_json_lines(line):
+    assert dt.garbled({"lines": ["fine line.", line]})
+
+
+def test_garbled_leaves_plain_speech_alone():
+    assert not dt.garbled({"lines": ["My premise: robots are anxious.", 'She said "no" twice.', "It's fine."]})
+
+
+def test_the_local_json_fragment_pattern_agrees_with_the_safety_rule_when_both_exist():
+    safety = pytest.importorskip("app.safety")
+    if not hasattr(safety, "JSON_FRAGMENT"):
+        pytest.skip("PR #91 not merged yet")
+    assert dt.JSON_FRAGMENT.pattern == safety.JSON_FRAGMENT.pattern and dt.JSON_FRAGMENT.flags == safety.JSON_FRAGMENT.flags
+
+
+def garble(root, split, pid, k, writer=None):
+    path = dp.bit_path(root, split, pid, writer) if writer else dp.bit_path(root, split, pid)
+    rec = dp._read(path)
+    rec["threads"][k]["lines"][2] = 'premise":'
+    if "raw" in rec["threads"][k]:
+        rec["threads"][k]["raw"] = json.dumps({"premise": "p", "jokes": rec["threads"][k]["lines"]})
+    dp._write(path, rec)
+
+
+def test_garbled_threads_leave_sft_and_every_dpo_pair_in_b_and_c(pool, written):
+    dp._write(dp.pool_path(written), pool)
+    ranking_bits(pool, written)
+    dt.label_all(FakeJudge(), "train", QWEN, teach_pairs(), pool, written, out=lambda *_: None)
+    first = train_prompts(pool, 1)[0]["id"]
+    rank = next(q["id"] for q in pool["prompts"] if q["split"] == "ranking")  # answered "1": thread 0 is the chosen one
+    garble(written, "train", first, 0, QWEN)
+    garble(written, "ranking", rank, 0)
+    m = dt.export(QWEN, written, out=lambda *_: None)
+    sft = {r["id"]: r for r in dt.read_jsonl(written / "train" / "sft_B.jsonl")}
+    dpo = dt.read_jsonl(written / "train" / "dpo_B.jsonl")
+    bit = dp._read(dp.bit_path(written, "train", first, QWEN))
+    # the winner was thread 0; the next-best clean thread (1, one win) takes the row, and no pair carries thread 0 as either side
+    assert sft[first]["completion"] == bit["threads"][1]["raw"] and len(sft) == 3
+    assert not any(r["id"].startswith(f"{first}-0-") for r in dpo) and len(dpo) == 7
+    assert 'premise\\":' not in "".join(r["chosen"] + r["rejected"] for r in dpo) + sft[first]["completion"]
+    c = dt.read_jsonl(written / "train" / "dpo_C.jsonl")
+    assert len(c) == 215 and rank not in {r["id"] for r in c}
+    assert m["dropped_garbled_threads"] == {"B": 1, "C": 1, "safe_in_pool": 1}
+    assert m["dropped_garbled_pairs"] == {"B": 2, "C": 1} and m["sft_dropped_garbled"] == 1
+    assert m["B"]["sft"] == 3 and m["B"]["dpo"] == 7 and m["C"]["dpo"] == 215
+
+
+def test_an_sft_row_is_dropped_when_every_thread_with_a_win_is_garbled(pool):
+    p = train_prompts(pool, 1)[0]
+    rec = bit_record(p)
+    rec["threads"][0]["lines"][0] = "oops}"
+    rows = [{"bit": p["id"], "i": 0, "j": 1, "status": "label", "winner": 0}]
+    stats = {}
+    sft, dpo, counts = dt.export_b(rows, {p["id"]: rec}, stats)
+    assert sft == [] and dpo == [] and stats == {"threads": {(p["id"], 0)}, "pairs": 1, "sft": 1}
+
+
+def test_a_clean_export_reports_zero_drops(exported):
+    _, m = exported
+    assert m["dropped_garbled_threads"] == {"B": 0, "C": 0, "safe_in_pool": 0} and m["dropped_garbled_pairs"] == {"B": 0, "C": 0}
+    assert m["sft_dropped_garbled"] == 0

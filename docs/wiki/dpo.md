@@ -49,6 +49,22 @@ All three start from `qwen3:4b-instruct` (D-124). The model the show uses today,
 
 The model sees its prompt as text in a fixed layout (a chat template). Ollama's layout for this model has a blank line after the system text that the Hugging Face one does not. The writer's bits and the live show both go through Ollama, so training uses Ollama's layout; a test compares it with what the real template renders.
 
+## Reading a training run (writer C)
+
+DPO's loss starts at 0.693 (ln 2, a coin flip): at step 0 the trained model equals its frozen reference copy, so it has no preference yet. Writer C (DPO on 119 human-ranked pairs, 3 passes) ended at 0.52 and preferred the human-chosen bit on almost every training pair, which with so few pairs means memorising; only blind votes on new prompts show whether it generalises.
+
+The learning rate warms up, peaks, then decays almost to zero, so the last steps barely change the model:
+
+| Where | Learning rate | Plain decimal | Share of the peak |
+|---|---|---|---|
+| Step 1 | 0 | 0 | warm-up, no update yet |
+| Step 2 | 2 × 10⁻⁶ | 0.000002 | 20% |
+| Peak | 1 × 10⁻⁵ | 0.00001 | 100% |
+| Third-last step | 2.4 × 10⁻⁷ | 0.00000024 | 2.4% |
+| Last step | 6.2 × 10⁻⁸ | 0.000000062 | about 0.6% |
+
+Annotated logs: [start of training](../../reports/figures/dpo/dpo-C-training-start.png), [end of training](../../reports/figures/dpo/dpo-C-training-log.png).
+
 ## Going deeper
 
 - [Direct Preference Optimization](https://arxiv.org/abs/2305.18290) (Rafailov et al., 2023): the method.

@@ -145,6 +145,40 @@ Qwen2.5-7B stays the fallback.
 Other model: `MODEL=<name> sbatch explorer/judge_ollama.sbatch` (and `--judge-model <name>` on the laptop); fallbacks in order are
 muse-glimmer 30b, then the transformers Qwen2.5-7B job above.
 
+## Training the writer (D-123, D-124)
+
+SFT and DPO of `Qwen/Qwen3-4B-Instruct-2507` (the same model as the laptop's `qwen3:4b-instruct`), LoRA, fp16 on the V100, TRL. Three
+writers: **A** the base, **B** SFT then DPO on Haiku's labelled pairs (DPO toward an AI judge's taste), **C** DPO on your own 120 pairs.
+Why this model and not bonsai: D-124 (bonsai has no full-precision checkpoint and needs transformers 5.2 or newer). Training text uses
+Ollama's chat layout, not Hugging Face's (`explorer/chatml.py`, D-124). Times are estimates until `smoke.sbatch` measures a step.
+
+**Run order.** Every step is yours to run; the PR ran none of them. "Laptop" steps need Ollama up with `OLLAMA_NUM_PARALLEL=3` and
+`OLLAMA_CONTEXT_LENGTH=8192`, and no live show running (the GPU is shared).
+
+| # | Where | Command | Time (estimate) | Cost |
+|---|---|---|---|---|
+| 1 | laptop | `python -m sim.dpo_pairs write --split train --writer qwen3:4b-instruct --env-file backend/.env` (resumable; then `topup --split train --writer qwen3:4b-instruct --env-file backend/.env`) | 800 bits at about 8 to 11 s: 2 to 3 h | Haiku safety check, about $0.3 |
+| 2 | laptop | `python -m sim.dpo_pairs label --split train --writer qwen3:4b-instruct --env-file backend/.env` (resumable; prints the cost as it goes) | at most 4,800 calls: 30 to 60 min | about $1 with caching (at most $1.3; $9 without) |
+| 3 | laptop | `python -m sim.dpo_pairs export --writer qwen3:4b-instruct`: writes `data/dpo/train/` (`sft_B`, `dpo_B`, `dpo_C`, `eval_prompts`, `manifest.json`) | seconds | none |
+| 4 | laptop | `scp data/dpo/train/{sft_B,dpo_B,dpo_C}.jsonl data/dpo/train/manifest.json <you>@<explorer login host>:/courses/CS5180.202710/students/<you>/humor-me/data/dpo/train/` (make the folder first; or the OOD Files app). `eval_prompts.jsonl` stays on the laptop | minutes | none |
+| 5 | cluster, once | `git fetch && git checkout feat/dpo-train` (or `main` once merged), then install the training libraries into the same venv: `sbatch -p courses --cpus-per-task=4 --mem=32G --time=01:00:00 -o logs/setup-train-%j.out --wrap 'source explorer/env.sh; uv pip install -r explorer/requirements-train.txt -c explorer/requirements-cluster.txt --index-strategy unsafe-best-match'` | about 5 min | none |
+| 6 | cluster | `mkdir -p logs && sbatch explorer/smoke.sbatch`, then read `logs/humor-smoke-<id>.out`: the versions, `[template] tokenizer == render_hf`, `[model] ... all fp32`, a loss for each of 10 steps and no NaN, `[memory] peak`, seconds per step, and the tail of each tokenized example (the end token `<|im_end|>` once). **Do not submit anything long until this looks right.** | 15 to 30 min (first run downloads the 8 GB model) | none |
+| 7 | cluster | `sbatch explorer/sft_B.sbatch` | about 1 to 2 h | none |
+| 8 | cluster | `sbatch explorer/dpo_B.sbatch` (merges the SFT adapter first) | 3 to 6 h | none |
+| 9 | cluster | `sbatch explorer/dpo_C.sbatch` (independent of B; `courses-gpu` runs one job at a time, so queue it behind or before B) | under 1 h | none |
+| 10 | cluster | `WRITER=C ADAPTER=data/dpo/train/runs/dpo_C sbatch explorer/merge_gguf.sbatch`, then `WRITER=B ADAPTER=data/dpo/train/runs/dpo_B BASE=data/dpo/train/runs/merged_sft_B sbatch explorer/merge_gguf.sbatch` (CPU partition; the first one builds llama.cpp) | about 30 min each | none |
+| 11 | laptop | `scp <you>@<host>:/courses/CS5180.202710/students/<you>/humor-me/data/dpo/train/runs/gguf/*-Q4_K_M.gguf data/dpo/train/gguf/` (about 2.5 GB each; Explorer course storage is deleted after final grades, so copy everything back now) | minutes | none |
+| 12 | laptop | `ollama show qwen3:4b-instruct --modelfile > data/dpo/train/gguf/Modelfile.base`, then for each writer `python -m sim.dpo_pairs modelfile --base data/dpo/train/gguf/Modelfile.base --gguf data/dpo/train/gguf/humor-qwen3-B-Q4_K_M.gguf --out data/dpo/train/gguf/Modelfile.B` and `ollama create humor-qwen3-B -f data/dpo/train/gguf/Modelfile.B` (same for C). The Modelfile keeps the base's template and parameters and swaps only the weights | minutes | none |
+| 13 | laptop | `python -m sim.dpo_pairs eval write --writer A --env-file backend/.env`, then `ollama stop` it and the same for `--writer B` and `--writer C` (60 bits each, one writer at a time: the bit times are the latency measure) | about 10 min each | Haiku safety check, about $0.1 |
+| 14 | laptop | `python -m sim.dpo_pairs eval plan` (30 of 30 pairs ready?), `eval power`, **then `eval bar --wins N`** (the proposal is 10; `eval vote` refuses without it, after the re-rank's self-agreement is known) | minutes | none |
+| 15 | laptop | `python -m sim.dpo_pairs eval vote` (30 blind pairs: 15 B against A, 15 C against A; resumable, `q` stops) | at your ranking pace (5 to 6 min a pair) 2.5 to 3 h; unmeasured | none |
+| 16 | laptop | `python -m sim.dpo_pairs eval judge --model opus --env-file backend/.env`, then `--model haiku` (reported only) | 30 to 60 min | Opus about $2.7 (360 calls), Haiku about $0.1 |
+| 17 | laptop | `python -m sim.dpo_pairs eval score --record`, then `python scripts/run_notebook.py notebooks/decisions-model.ipynb` | minutes | none |
+
+An interrupted Slurm job: submit the same command again (training resumes from the last checkpoint, saved every 25 steps, and a job saves
+and stops itself at 7.5 h). A NaN loss or gradient norm stops a run with exit code 3: lower `LR=` (`LR=5e-6 sbatch explorer/dpo_B.sbatch`).
+If the reward accuracy stays at 0.5 after a few dozen steps, raise it. Outputs live under `data/dpo/train/runs/` on the cluster.
+
 ## Storage: what survives where
 
 Each job lands on **whatever node is free**: never assume the same machine twice. Everything that

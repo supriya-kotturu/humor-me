@@ -83,7 +83,11 @@ DPO on top of B's SFT copy, one pass over the pairs, 186 steps, 22 minutes of tr
 
 ![Writer B's last 10 DPO steps: both rewards negative, rejected lower](../../reports/figures/dpo/dpo-B-training-table.png)
 
-Compare with C's table above: C's chosen reward rises, B's falls. Annotated logs: [start of training](../../reports/figures/dpo/dpo-B-training-start.png), [end of training](../../reports/figures/dpo/dpo-B-training-log.png). Job results: [sacct](../../reports/figures/dpo/dpo-B-sacct.png); the two GGUF files have different hashes, so B and C are different models: [hashes](../../reports/figures/dpo/gguf-hashes.png).
+Compare with C's table above: C's chosen reward rises, B's falls.
+
+Annotated logs: [start of training](../../reports/figures/dpo/dpo-B-training-start.png), [end of training](../../reports/figures/dpo/dpo-B-training-log.png).
+
+Job results: [sacct](../../reports/figures/dpo/dpo-B-sacct.png). The two GGUF files have different hashes, so B and C are different models: [hashes](../../reports/figures/dpo/gguf-hashes.png).
 
 ## Going deeper
 

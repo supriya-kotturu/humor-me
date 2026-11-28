@@ -1620,10 +1620,81 @@ python -m sim.dpo_pairs judge --env-file backend/.env                   # after 
 python -m sim.dpo_pairs score --record                                  # writes reports/metrics/dpo_judge_gate.json
 python -m sim.dpo_pairs pool --split train --rebuild                    # later, with 3+ days stored, before any judge labelling
 ```
-**Verdict rule.** `pass`: judge labelling of the training split may run next (a later PR), after the training rebuild above. `fail`: D-102's fallback, more of your votes or another judge. DPO does not run on a judge that fails.
+**Verdict rule.** `pass`: judge labelling of the training split may run next (a later PR), after the training rebuild above. `fail`: D-102's fallback, more of your votes or another judge (D-122 took "another judge"). DPO does not run on a judge that fails.
 
 **Pre-merge review (2026-11-26, before any data).** Fixed: (1) a plain bit written after a tonight bit kept the tonight day's allow lists in the safety check, so names a plain show rejects could pass; a re-checked bit got stale lists. (2) A bit with no thread (Ollama down, every call timed out) was saved as finished and never retried, so an outage mid-run would silently empty the rest of the split. (3) The fixed cell order (teach tonight, test tonight, teach plain, test plain) and a progress line split by teach and test told you which questions were test pairs. (4) The disjointness key held the bit number for the tonight half, so the same request at bits 4 and 5 passed (planted; now caught). (5) Gists reused by two ranking prompts could land in both a teach and a test prompt (4 of 21 on a made-up 21-gist day); prompts sharing a gist now share a role. (6) A rebuild set aside every training bit, the unchanged plain half too (about 400 bits, an hour of writing); unchanged prompts now keep their bit, a second rebuild no longer collides, and the writer rewrites a record made for another prompt with the same id. (7) The record's key now includes a digest of every answer (test answers are not in the teach prompt). Recomputed and unchanged: the least a (21 of 30, 30 of 45, 38 of 60) and the power figures (1.4%, 74%, 91%, 98%, 99.9%; D-102's 66%, 90%, 98%). **Scope, not fixed:** the gate measures agreement on pairs you had a preference on; ties and skips are left out of teach and test alike, so the judge's accuracy on training pairs you would have tied is not measured. The tie and skip counts are reported for that.
 
 **Self-agreement (the user's choice, 2026-11-26, set before any re-rank answer exists; reported only, no bar).** Why: no judge can agree with you more than you agree with yourself, so your own repeat rate is the ceiling for the judge's number. How: after the 120 pairs are decided, `rerank` asks 20 of them again (seeded: 5 in each of teach and test for each of tonight and plain, so 10 teach and 10 test), the same two threads with the sides re-drawn by a new seed, no skip, and never shows the earlier answer. Answers go to `data/dpo/rerank.json` after each one (resumable); `rank.json` is never written. `score` reports how many of the 20 got the same pick (a tie on the re-rank counts as a disagreement and is shown separately), with a Wilson 95% range, and beside it the judge's agreement on the test pairs among the 20 (teach pairs were shown to the judge, so they are left out there). With no `rerank.json`, `score` says "not run". The record's key includes a digest of the re-rank answers, so it reflects them; the Exp 36 verdict never reads them (tested).
 
-**Result: pending.** The user ranks and runs Exp 36 on this branch; the numbers, the outcome and any change to this entry go in the same PR.
+**Result (2026-11-27): the bar was not met; verdict `fail`.** Run by the user on this branch (`judge`, then `score --record`; the re-rank was skipped by the user's choice, so self-agreement is not run). Record: `reports/metrics/dpo_judge_gate.json` (numbers only).
+
+| Check | Result | Bar |
+|---|---|---|
+| Test pairs answered the same way in both orders (c) | 46 of 60 | at least 30: met |
+| Of those, the judge picks the user's thread (a) | 24 of 46 = 52%, Wilson 95% range 38% to 66% | lower end above 50%: **not met** (30 of 46 was the least) |
+| Pairs where the orders disagree | 23% (14 of 60) | beside the bar |
+| Tonight half: consistent, agreeing | 20 of 30, 11 | beside the bar |
+| Plain half: consistent, agreeing | 26 of 30, 13 | beside the bar |
+| Strict count (a of all 60) | 24 of 60 (Wilson 95% 29% to 53%) | beside the bar |
+| Half-credit rate (a flipped pair earns half) | 0.517 | beside the bar |
+| Ties / skips while ranking | 12 / 12 of 144 answers | beside the bar |
+| Self-agreement (re-rank of 20) | not run (the user skipped it) | reported only |
+
+Reading. The judge is consistent often enough (76% of pairs) but its consistent answers are a coin flip against the user's taste: 52% with a range that includes 38% to 66%. The half-credit rate (0.517) and the strict count agree. Neither half is better: 55% on tonight, 50% on plain, on 20 and 26 pairs. The test could not tell a judge that is 50% from one that is 60% right per pair, but it was built to detect about 65% and up (power table above, 74% at 65%), and the point estimate is 52%. **Haiku 5.5 taught with 60 same-model pairs does not predict the user's taste, so DPO does not run on its labels** (D-102's rule). The Haiku result stays recorded as a fail whatever any later judge does. Whether the user's own repeat rate is also near 50% is unknown, because the self-agreement re-rank was skipped: if it is, no judge could pass, which would be a finding about the pairs, not about Haiku. D-122 records the next step.
+
+**Ranking time (user's report, not measured).** The user reports the ranking took about 12 to 16 hours over Nov 26 to 27, not the planned 70 minutes (35 s a pair was a guess). The answers carry no timestamps, so this was not measured. From now on every new rank and rerank answer carries `at` (UTC, ISO, seconds); old answers stay as they are, and the record's key still covers them unchanged (tested). The planning figure for any future ranking should be counted in hours, not minutes: it matters for the "collect fresh pairs" option in D-122.
+
+## <a id="d-122"></a>D-122 · 2026-11-27 — Try Claude Opus 5.5 as the judge on the same 120 pairs, with a stricter bar for the second look (Exp 37) (user)
+Decided by the user, 2026-11-27, after Exp 36 failed (D-121). The model, the bar and the correction below are fixed **before any Opus answer exists**; nothing from Exp 37 can change them.
+
+**Choice.** Run the gate again with one other model, on the **same 60 teach and 60 test pairs**, rather than collect fresh pairs. The model is **Claude Opus 5.5 (`claude-opus-5-5`)**, one model only. Same judge prompt, same 60 teach examples in the same order, same both-orders protocol, same reply schema and `effort: low` as the Haiku run; only the model id changes. Differences forced by the model, all of them infrastructure: (a) Opus 5.5 returns a 400 if thinking is disabled at any effort, so thinking is on (adaptive, effort low), where Haiku's ran with it off; the client omits the `thinking` field for this model. (b) Adaptive thinking is slower than the safety check's 12 s / 25 s timing, so Opus gets 90 s per call and 240 s per judgment (a timeout would otherwise count as a missing answer, an `incomplete` verdict). (c) The teach examples (about 18,000 tokens, identical in all 120 calls) are marked for prompt caching (`cache_system`, off by default, so no other caller changes). Neither (a) nor (c) changes what the model is asked; (a) means "same settings" is true for the prompt and effort, not for thinking, which Haiku had off. Separate cache `data/dpo/judge/<digest>/` (the model is part of the digest) and a separate record `reports/metrics/dpo_judge_gate_opus.json`. Haiku stays the default for every command, so Exp 36 reproduces (checked: the Haiku digest `4af1cf27` and its score are unchanged).
+
+**Why a stricter bar for a second look at the same test set (set now, before any Opus answer).** The 60 test pairs were already used to judge Haiku. Trying a second judge on them and stopping when one passes is optional stopping: with two chances to cross the same line, the chance that a judge with no real skill passes roughly doubles. Correction (**Bonferroni for two looks**): the Wilson lower end must be above 50% at the **97.5%** level, z = 2.2414 (the 95% bar spends 5% on one look; two looks at 2.5% each keep the total near 5%). **Pass iff c >= 30 AND the lower end of the 97.5% Wilson range of a/c is above 50%.** This is a **judgment call on the correction method, not measured**: a plain Bonferroni is the simplest and mildly conservative (the two looks are not independent, since the same pairs and examples are used), and a stricter or looser choice is defensible. The Haiku result stays a fail under its own 95% bar; it is not re-scored under this one (it fails there too: 24 of 46 is far below 31).
+
+| c (consistent pairs) | least a, Exp 36 bar (95%) | **least a, Exp 37 bar (97.5%)** |
+|---|---|---|
+| 30 (the floor) | 21 | **22** |
+| 46 (Haiku's c) | 30 | **31** |
+| 60 (all) | 38 | **39** |
+
+Power (computed, exact binomial, same assumptions as D-121: the judge is right with probability p in each order, the two orders' errors independent, no position preference, 60 test pairs). Chance of passing:
+
+| Judge truly right per order | Exp 36 bar | **Exp 37 bar** |
+|---|---|---|
+| 50% | 1.4% | **0.7%** |
+| 65% | 73.8% | **69.5%** |
+| 70% | 91.2% | **90.7%** |
+| 75% | 98.2% | **98.2%** |
+| 80% | 99.9% | **99.9%** |
+
+The correction costs about 4 points of power at 65% and nothing from 75%, and halves the false-pass chance at 50%. Both tables are pinned by tests.
+
+**Options and trade-offs.**
+| Option | For | Against | Chosen |
+|---|---|---|---|
+| (a) Claude Opus 5.5 on the same pairs | Strongest model we can call; zero new ranking time; same prompt and protocol | A second look at used test pairs, so a stricter bar; costs more per call; thinking cannot be turned off | **Yes (the user's choice)** |
+| (b) Claude Sonnet 5.5 on the same pairs | About half Opus's price (2 and 10 dollars per million tokens against 4 and 20) | Weaker; the same second-look problem; if it fails the user pays for another try | No: a judge that fails again leaves no time, so the strongest model first |
+| (c) Fresh pairs for a new teach and test set | Clean test: no second-look correction, and the full 95% bar | The ranking took 12 to 16 hours for 120 pairs (user's report); with the deadline (Dec 8 target, Dec 14 report) another round costs most of a day or two the user may not have | No (the user's choice): reuse the pairs |
+| One model only | Models are not shopped until one passes; a third look would need a second correction | If Opus fails there is no fallback judge | **Yes, one model only**, chosen before running |
+
+**Cost estimate (before running; no API call made).** Local count of one request from the real prompts under `data/dpo` (read only): system prompt (teach examples) 72,474 characters, one user message about 1,207 characters on average. At about 4 characters a token: **about 18,100 tokens of system plus 300 of pair, 18,400 in a call**; 120 calls. The count is a characters/4 approximation, it may undercount by up to about 20%. Output: the reply is a few tokens of JSON, but thinking tokens count as output; assumed 200 to 1,000 per call at effort low (unmeasured: the first run prints the real totals). Prices (Opus 5.5, per million tokens, from the Claude API model table cached 2026-11-03: 4 dollars in, 20 out, cache reads 0.20; a cache write is assumed at the standard 1.25 times the input price, 5 dollars; check the current price list before relying on it):
+| | Input | Output (200 to 1,000 per call) | **Total** |
+|---|---|---|---|
+| Without caching | 120 x 18,400 = 2.21M tokens = **$8.83** | $0.48 to $2.40 | **about $9.3 to $11.2** |
+| With caching | 1 write 18,100 x $5 = $0.09, 119 reads 2.15M x $0.20 = $0.43, pair text 36k x $4 = $0.14: **about $0.66** | $0.48 to $2.40 | **about $1.1 to $3.1** |
+Caching needs the 120 calls close together (the cache lives 5 minutes after each read); `judge` runs them back to back, and a resumed run pays the write again. A `judge` run prints the real token totals, including cache reads and writes.
+
+**If Opus passes.** The training pool's labelling may run with Opus (a later PR), after the training split is rebuilt with 3 or more days. Labelling cost for 800 prompts x 3 pairs x 2 orders = **4,800 calls**: with caching (same teach prefix) about **$23 input** (4,800 x (18,100 x $0.20 + 300 x $4) per million) plus **$19 to $96 output** = **about $42 to $119**; without caching about **$353 input + $19 to $96 = $372 to $449**. The Batch API (half price, not planned) could cut it further. **If Opus fails:** DPO does not run; the project ships without DPO, and the two negative results (Haiku 24 of 46, Opus's own numbers) go in the report as the answer to "can a frozen LLM judge stand in for your taste on same-model pairs". Fresh pairs stay possible only if the user picks them with the deadline in view.
+
+**What is not controlled.** The same 60 test pairs are used twice (corrected above, not eliminated). Thinking is on for Opus and off for Haiku, so a difference between the two results is the model and the thinking together. The user's own repeat rate (the re-rank) was not collected, so a failure cannot be separated from "the pairs are too close for anyone to agree on".
+
+**Judgment calls, not measured.** The Bonferroni correction for two looks and z = 2.2414; Opus's timeouts (90 s, 240 s); 200 to 1,000 output tokens a call; the 1.25 cache-write price.
+
+**Commands (the user runs these; the PR runs none).**
+```
+python -m sim.dpo_pairs judge --model opus --env-file backend/.env   # 120 Opus calls, cached in data/dpo/judge/<opus digest>/; prints token totals
+python -m sim.dpo_pairs score --model opus                          # table on screen, no record
+python -m sim.dpo_pairs score --model opus --record                 # writes reports/metrics/dpo_judge_gate_opus.json (Exp 37)
+python scripts/run_notebook.py notebooks/decisions-model.ipynb      # Exp 37 section fills in
+```
+**Result: pending.** The user runs Exp 37 on this branch; the numbers and the outcome go in this entry in the same PR.

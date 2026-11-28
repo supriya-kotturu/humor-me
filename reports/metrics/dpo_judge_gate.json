@@ -1,0 +1,19 @@
+{"params": {"answers_digest": "1466530d", "judge_digest_": "4af1cf27", "min_consistent": 30, "pool_digest": "c66f28f4", "rank_seed": "dpo-rank-v1", "rerank_digest": ""}, "results": {
+  "verdict": "fail",
+  "n_test": 60,
+  "consistent": 46,
+  "agree_consistent": 24,
+  "min_consistent": 30,
+  "wilson95": [0.3814, 0.6588],
+  "agree": 24,
+  "wilson95_strict": [0.2857, 0.5263],
+  "missing_pairs": 0,
+  "flip_rate": 0.2333,
+  "agree_flip_half_credit": 0.5167,
+  "agree_single_order": 0.5167,
+  "by_half": {"tonight": {"pairs": 30, "agree": 11, "consistent": 20, "flip_rate": 0.3333}, "plain": {"pairs": 30, "agree": 13, "consistent": 26, "flip_rate": 0.1333}},
+  "ties": 12,
+  "skips": 12,
+  "judge": {"provider": "anthropic", "model": "claude-haiku-5-5", "teach_pairs": 60},
+  "self_agreement": {"status": "not run"}
+}}

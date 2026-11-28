@@ -1072,11 +1072,11 @@ Same decision and pairs design, run on HEAD 14f7bd0 (places, checked organisatio
 - No public figure was approved that day, so none of the 10 new bits named one; the public-figure rule is covered by the filter check only.
 
 
-## Does the judge agree with you on same-writer pairs? (Exp 36, pending)
+## Does the judge agree with you on same-writer pairs? (Exp 36)
 
 Decision: [D-121](agent/decisions-detail.md#d-121), which carries out [D-102](agent/decisions-detail.md#d-102). Raw: `reports/metrics/dpo_judge_gate.json` (written by `score --record` after you run it). Code: `sim/dpo_pairs.py`.
 
-**Status: pending. You rank 120 pairs and run the judge; nothing is recorded yet.**
+**Status: done (2026-11-27). The bar was not met.** Claude Haiku 5.5 does not predict your taste on same-writer pairs, so DPO does not run on its labels. [Exp 37](#does-claude-opus-55-agree-with-you-on-the-same-pairs-exp-37-pending) tries Opus 5.5 on the same pairs.
 
 What it tests: DPO needs thousands of "which bit is funnier" labels, and only a judge can give that many. First it has to agree with you on bits of one request written by the same model, which are closer than the cross-model ballot of Exp 24. You rank 120 pairs. 60 teach the judge your taste, and 60 are held back as the test. The judge is Claude Haiku 5.5, your choice.
 
@@ -1090,20 +1090,69 @@ Also reported, with no bar: how often the two orders disagree, agreement for eac
 
 | Check | Result | Bar |
 |---|---|---|
-| Test pairs answered the same way in both orders | pending | at least 30 of 60 |
-| Of those, the judge picks your bit | pending | likely range above 50% |
-| Pairs where the two orders disagree | pending | beside the bar |
-| Agreement, tonight half / plain half | pending | beside the bar |
-| Verdict | pending | the bar |
+| Test pairs answered the same way in both orders | 46 of 60 | at least 30: met |
+| Of those, the judge picks your bit | 24 of 46 (52%) | likely range above 50% |
+| Likely range | 38% to 66% | lower end above 50%: **not met** |
+| Pairs where the two orders disagree | 23% | beside the bar |
+| Tonight half: consistent, agreeing | 20 of 30, 11 | beside the bar |
+| Plain half: consistent, agreeing | 26 of 30, 13 | beside the bar |
+| All 60 pairs, a no-label pair counted as a miss | 24 of 60 | beside the bar |
+| A no-label pair earning half | 0.517 | beside the bar |
+| Ties / skips while ranking | 12 / 12 of 144 answers | beside the bar |
+| Verdict | **fail** | the bar |
 
-Self-agreement (reported only, no bar): you re-rank 20 of your 120 pairs (`rerank`, sides re-drawn, earlier answer hidden); how many you pick the same way is a ceiling for any judge on these pairs, shown beside the judge's agreement on the test pairs among them.
+Reading: the judge answered the same way in both orders often enough, but on those pairs it picks your bit about half the time, which is chance. 30 of 46 was the least that clears. Both halves sit near 50%.
+
+Ranking time: you report 12 to 16 hours over Nov 26 to 27, not the planned 70 minutes. The answers had no times, so this is your estimate, not a measurement. New answers now carry a time.
+
+Self-agreement (reported only, no bar): not run, you skipped the re-rank of 20 pairs. How often you pick the same way twice would be a ceiling for any judge on these pairs.
 
 Top-up: about 40% of threads fail the show's safety check, so bits with fewer than 2 clean threads get up to 2 more batches on the same request (`topup`); bits you may already have seen are not changed.
 
-How to run it: the commands are at the end of D-121.
+How you ran it: the commands are at the end of D-121.
 
 Caveats:
 - The Qwen judge D-102 named was never built, and the rewritten judge of D-114 only checks that lines connect, so this is the first judge of pairs.
 - A judge that favours one position loses pairs to "no label", so a fail may mean position bias; the disagreement share is reported for that.
 - Whether the judge stays right as DPO changes the model is not checked.
 - The test only covers pairs where you had a pick. Pairs you tie or skip are left out, so how the judge does on pairs you find equal is not measured.
+
+## Does Claude Opus 5.5 agree with you on the same pairs? (Exp 37, pending)
+
+Decision: [D-122](agent/decisions-detail.md#d-122), after [Exp 36](#does-the-judge-agree-with-you-on-same-writer-pairs-exp-36) failed. Raw: `reports/metrics/dpo_judge_gate_opus.json` (written by `score --model opus --record` after you run it). Code: `sim/dpo_pairs.py`.
+
+**Status: pending. You run the judge; nothing is recorded yet.**
+
+What it tests: the same question as Exp 36, on the same 60 teach and 60 test pairs, with Claude Opus 5.5 as the judge. Same prompt, same examples, both orders, same settings. One difference you should know: Opus 5.5 cannot run with thinking off, so its thinking is on at low effort, where Haiku's was off. One model only, picked before running.
+
+**The bar (set before any Opus answer).** The 60 test pairs were already used once, so a second look needs a stricter bar. Otherwise trying models until one passes would pass a judge with no skill about twice as often. It passes if it answers at least 30 of the 60 the same way in both orders, and among those its agreement with you has a likely range above 50% at the **97.5%** level (Exp 36 used 95%). The least that clears:
+
+| Pairs answered the same way in both orders | Exp 36 (95%) | Exp 37 (97.5%) |
+|---|---|---|
+| 30 | 21 | 22 |
+| 46 | 30 | 31 |
+| 60 | 38 | 39 |
+
+Chance of passing, if the judge is right this often in each order and its two orders err independently: 50%: 0.7%. 65%: 70%. 70%: 91%. 75%: 98%. (Exp 36's bar gave 1.4%, 74%, 91%, 98%.)
+
+**Cost (estimate, nothing run).** One request is about 18,400 tokens, 120 of them. At Opus 5.5 prices (4 dollars in and 20 out per million tokens, cache reads 0.20; check the price list): about **$1 to $3 with caching** (the shared examples are cached), **$9 to $11 without**. The output part is a guess (200 to 1,000 tokens a call, thinking included); `judge` prints the real totals. If it passes, labelling the training pairs (4,800 calls) would cost about $40 to $120 with caching.
+
+| Check | Result | Bar |
+|---|---|---|
+| Test pairs answered the same way in both orders | pending | at least 30 of 60 |
+| Of those, the judge picks your bit | pending | likely range (97.5%) above 50% |
+| Pairs where the two orders disagree | pending | beside the bar |
+| Agreement, tonight half / plain half | pending | beside the bar |
+| Verdict | pending | the bar |
+
+How to run it:
+```
+python -m sim.dpo_pairs judge --model opus --env-file backend/.env
+python -m sim.dpo_pairs score --model opus --record
+```
+If it fails, DPO does not run and the project ships without it; both results go in the report.
+
+Caveats:
+- The same 60 test pairs are used twice. The stricter bar reduces the risk, it does not remove it.
+- Thinking is on for Opus and off for Haiku, so a difference between the two is the model and the thinking together.
+- You did not re-rank 20 pairs, so there is no number for how often you agree with yourself. If it is low, no judge could pass.

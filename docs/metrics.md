@@ -1105,7 +1105,7 @@ Reading: the judge answered the same way in both orders often enough, but on tho
 
 Ranking time: you report 12 to 16 hours over Nov 26 to 27, not the planned 70 minutes. The answers had no times, so this is your estimate, not a measurement. New answers now carry a time.
 
-Self-agreement (reported only, no bar): not run, you skipped the re-rank of 20 pairs. How often you pick the same way twice would be a ceiling for any judge on these pairs.
+Self-agreement (reported only, no bar): not run when this was recorded. You started the re-rank of 20 pairs after Exp 37; it is pending. How often you pick the same way twice is a ceiling for any judge on these pairs. It does not change the verdict.
 
 Top-up: about 40% of threads fail the show's safety check, so bits with fewer than 2 clean threads get up to 2 more batches on the same request (`topup`); bits you may already have seen are not changed.
 
@@ -1162,7 +1162,7 @@ Chance of passing, if the judge is right this often in each order and its two or
 
 The teach pairs have no answers in either cache: they are in the judge's prompt, so they were never asked.
 
-Reading: the two judges agree with each other far more than either agrees with you. That fits a shared model taste that differs from yours. It also fits your picks on close pairs being noisy. You did not re-rank, so these cannot be told apart. 24 of 144 ranking answers were ties or skips, which says some pairs were hard for you too.
+Reading: the two judges agree with each other far more than either agrees with you. That fits a shared model taste that differs from yours. It also fits your picks on close pairs being noisy. Your re-rank of 20 pairs (pending) will help tell these apart. 24 of 144 ranking answers were ties or skips, which says some pairs were hard for you too.
 
 Outcome: two strong judges at about a coin flip on same-model pairs (24 of 46, 25 of 53) is a clean negative result for "an LLM judge as a stand-in for one person's taste on close pairs". Per D-122's rule, DPO does not run on either judge's labels. You confirm the next step.
 
@@ -1176,4 +1176,4 @@ Both results go in the report.
 Caveats:
 - The same 60 test pairs are used twice. The stricter bar reduces the risk, it does not remove it.
 - Thinking is on for Opus and off for Haiku, so a difference between the two is the model and the thinking together.
-- You did not re-rank 20 pairs, so there is no number for how often you agree with yourself. If it is low, no judge could pass.
+- How often you agree with yourself is not known yet: the re-rank of 20 pairs is pending. If it is low, no judge could pass.

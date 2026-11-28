@@ -667,6 +667,15 @@ JSON_JUNK = [
     "[{ and a joke",
     "my json parser is more stable than me",
     "That was a Thought Trace of regret.",
+    # More shapes from the review (D-125): a bare key, snake_case, a list closer, lines joined into one, curly quotes.
+    "premise",
+    "  Jokes. ",
+    "tag_1",
+    "mode_name_optimist",
+    "I'm waiting for someone to say 'hello']",
+    'and that was the end."],',
+    "My logs say you said hi.', 'And then I rebooted.",
+    "premise”: “a robot at a party",
 ]
 
 
@@ -695,6 +704,10 @@ ORDINARY = [
     "Thought about it all night; still a robot.",
     "My trace of dignity is in the logs somewhere.",
     "She whispered, 'Don't unplug me,' and I did anyway.",
+    "It knows three words: 'yes', 'no', and 'maybe'.",
+    "My premise is simple: I am tired.",
+    "Lines are long at the charging station.",
+    "I said 'Stop.' and it kept going.",
 ]
 
 

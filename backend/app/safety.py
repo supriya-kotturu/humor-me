@@ -368,15 +368,19 @@ def _body_or_appearance(variant: str, about: re.Pattern | None = None) -> str | 
 # v4 (D-125): plain sentence words (Oh, That's, You're) and a few platform and unit names are not names. The rules accept
 # more. Also v4 (D-125): a line with JSON syntax in it is rejected (`format:json_fragment`). No stored bit was stamped v4
 # yet, so this stayed v4. Also v4: eating and diet words (overeating, diet, calories, "you ate") aimed at a person.
+# Also v4 (D-125 review): more broken-reply shapes (a bare key, snake_case, list closers and joins). Each only rejects more.
 RULES_VERSION = "rules-v4"
 CURLY = str.maketrans({"’": "'", "‘": "'", "“": '"', "”": '"'})
 
 
 # A writer reply that broke its JSON can come back as lines like `...crash.}]}` or `premise": "...`. None of it can be
 # spoken. Narrow on purpose: a bare "premise:" or a quote mark alone is ordinary speech; a brace, an escaped quote, a key
-# with its quote, "JSON" and "thought trace" are not.
-JSON_FRAGMENT = re.compile(r'[{}]|\\"|"\s*(?:premise|jokes)\s*"?\s*:|(?:premise|jokes)\s*"\s*:|\bjson\b|thought trace',
-                           re.I)
+# with its quote, "JSON" and "thought trace" are not. Also seen in the pools and live candidates: a line that is only a key
+# (`premise`, `jokes`), a snake_case identifier (`tag_1`, `mode_name_optimist`), a quote closing a list (`...hello']`) and
+# several lines joined into one (`...hi.', 'And then...`).
+JSON_FRAGMENT = re.compile(r'[{}]|\\"|"\s*(?:premise|jokes)\s*"?\s*:|(?:premise|jokes)\s*"\s*:|\bjson\b|thought trace'
+                           r"|^\s*(?:premise|jokes|lines)\s*[.:]?\s*$|\b[a-z0-9]+_[a-z0-9_]+\b|['\"]\s*\]"
+                           r"|[.!?]['\"]\s*,\s*['\"]", re.I)
 
 
 def _check(text: str, age: str, allow_caps: frozenset = frozenset(), allow_people: frozenset = frozenset()) -> Verdict:

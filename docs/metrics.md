@@ -1202,3 +1202,31 @@ Two comparisons share one base, so a coin-flip writer clears "at least 10" in on
 
 **Cost.** Labelling B's pairs with Haiku: about $1.3 with caching (at most 4,800 calls), about $12 without (the teach prompt is about 24,100 tokens, measured in Exp 37). Opus's reading of Exp 38: 360 calls, about $2.7 (Exp 37 cost $0.91 for 120).
 
+## Do other people pick like you, or like the judges? (Exp 39)
+
+Decision: [D-122](agent/decisions-detail.md#d-122), evidence only. Raw: `reports/metrics/dpo_friend.json` (numbers only). Code: `sim/dpo_friend.py`.
+
+**Status: done (2026-11-27). Reported only, no bar, no decision.**
+
+What it tests: whether anyone else picks the bit you picked. One friend rated 30 of your ranked pairs (16 teach, 14 test) blind in a form. Judges are compared on test pairs only, where they answered the same way in both orders. "Can't pick" is left out.
+
+| Comparison | Agree | Likely range (95%) |
+|---|---|---|
+| Friend vs you | 10 of 23 (43%) | 26% to 63% |
+| Friend vs you, test pairs only | 5 of 13 | 18% to 64% |
+| Haiku 5.5 judge vs friend | 6 of 10 | 31% to 83% |
+| Opus 5.5 judge vs friend | 6 of 11 | 28% to 79% |
+| You vs yourself (re-rank, for scale) | 12 of 20 | 39% to 78% |
+
+By cell, friend vs you: teach/plain 2 of 5, teach/tonight 3 of 5, test/plain 2 of 7, test/tonight 3 of 6. The friend could not pick on 7 of 30 pairs.
+
+Reading: everyone is near a coin flip with everyone, except the two judges with each other (32 of 41, 78%). Same-writer pairs look too close for people to agree on, and the two models seem to share a taste of their own. One rater and 13 to 23 pairs cannot prove either: every range includes 50%.
+
+Caveats:
+- One rater. A second would add rater-against-rater and majority-against-you numbers (already coded).
+- Teach pairs cannot be used for the judges, so the judge rows rest on 10 and 11 pairs.
+
+How to run it:
+```
+python -m sim.dpo_friend score --csv data/dpo/friend/responses.csv --record
+```

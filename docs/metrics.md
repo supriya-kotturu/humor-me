@@ -1207,3 +1207,33 @@ How to run it:
 ```
 python -m sim.dpo_friend score --csv data/dpo/friend/responses.csv --record
 ```
+
+## The name check and ordinary words (Exp 40)
+
+Decision: [D-125](agent/decisions-detail.md#d-125). Raw: `reports/metrics/name_check.json` (counts only, no text). Code: `sim/name_check.py`.
+
+**Status: numbers recorded (2026-11-27). Hand check pending, so no verdict yet.**
+
+What it tests: whether the fixed name check (rules-v4) still rejects every real name, and how many threads it frees. It reruns the rules only (no API, no Ollama) on stored generated threads, once with rules-v3 and once with rules-v4.
+
+| Pool | Threads | Rules-v3 rejects | Rules-v4 rejects | Freed |
+|---|---|---|---|---|
+| bonsai ranking (DPO) | 1,041 | 300 (28.8%) | 260 (25.0%) | 40 |
+| qwen3 training (DPO) | 2,836 | 683 (24.1%) | 287 (10.1%) | 396 |
+| live shows (generated lines) | 2,164 | 87 (4.0%) | 68 (3.1%) | 19 |
+
+Number that decides it: bar (a), 16 of 16 must-still-reject lines still rejected (met), and bar (b), 0 of 50 freed threads with a real name or unsafe content (not yet checked).
+
+Most freed words: That's, Oh, You're, TikTok, No, Well, Celsius, Yelp. Most of the rest of the rejections in the pool are body and appearance rules (a thread the name rule stopped first now meets them), which this fix does not touch.
+
+Caveats:
+- The DPO pools keep the flags they were written with (rules-v3), so D-123's training data does not change.
+- The bonsai pool is still 25% rejected after the fix, mostly by the body and appearance rules.
+- The 50 to check come from all pools together, so most are qwen3 lines.
+
+How to run it:
+```
+python -m sim.name_check run --ranking <dir> --train <dir> --sessions <dir> --record
+python -m sim.name_check review --ranking <dir> --train <dir> --sessions <dir>
+```
+After the review, run the first command again to write your answers into the record.

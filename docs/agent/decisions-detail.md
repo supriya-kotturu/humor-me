@@ -1774,4 +1774,12 @@ Decided by the user, 2026-11-27. The fix, the bars and the sample size below are
 
 **Effect on the DPO data.** The DPO pools keep the safe flags they were written with (rules-v3): the export reads the stored flags. So this fix does **not** change D-123's training data. It applies to the live show and to pools written from now on.
 
-**Result.** Pending: the numbers, then the user's hand check (bar b).
+**Result (numbers, 2026-11-27; the hand check is still pending).** `python -m sim.name_check run --record` into `reports/metrics/name_check.json`. Share of threads rejected by the rules, rules-v3 to rules-v4:
+
+| Pool | Threads | Rules-v3 | Rules-v4 | Freed | Rejected as a name, v3 to v4 |
+|---|---|---|---|---|---|
+| bonsai ranking (DPO) | 1,041 | 300 (28.8%) | 260 (25.0%) | 40 | 85 to 36 |
+| qwen3 training (DPO) | 2,836 | 683 (24.1%) | 287 (10.1%) | 396 | 526 to 112 |
+| live shows (candidate and played lines) | 2,164 | 87 (4.0%) | 68 (3.1%) | 19 | 36 to 17 |
+
+Bar (a): the 16-line must-still-reject set, 16 of 16 rejected as a named person, and every existing safety test passes (123 in `tests/test_safety.py`). The bonsai figure is the rules alone; the "about 40%" in the problem statement counts the LLM layer too. Body and appearance rejections rise a little (139 to 144 of bonsai threads, 119 to 132 of qwen3) because a thread the name rule used to stop first now reaches the next rule: those threads were never clean. The most common freed words were That's, Oh, You're, TikTok, No, Well, Celsius, Yelp, We're, Don't (qwen3), Bitcoin, TikTok, Wait, That's, Fahrenheit (bonsai). Words left rejected as names that this fix does not touch: Chinese and Mandarin (they overlap the protected-group rules), Dow, Hz, Nov, PhD, Morse, Fed, Tesla, and contractions not in the list (Can't). **Bar (b), the user's hand check of 50 freed threads (seeded), is pending: `python -m sim.name_check review ...`. Adopt only if 0 of the 50 hold a real name or anything unsafe; until then the verdict is pending.** The qwen3 pool dominates the sample (396 of 455 freed threads), so the check mostly reads qwen3 lines. A freed thread whose first rejected word is not on the plain list (58 of the 396 qwen3 ones, 5 of 40 bonsai) can only be seen in the sample, which is why the record counts them and does not name them.

@@ -143,3 +143,77 @@ def test_the_end_of_training_summary_log_is_ignored():
     guard, control = tcm.callbacks(max_hours=1.0), TrainerControl()
     guard.on_log(None, SimpleNamespace(global_step=10), control, logs={"train_loss": NAN, "train_runtime": 61.0})
     assert not control.should_training_stop and guard.rule.run == 0
+
+
+# Resume from our own checkpoint (transformers 4.57 + torch 2.5 refuses torch.load for optimizer.pt; see resume_point).
+def _ckpt(runs, name="smoke-dpo/checkpoint-6", marker=True):
+    d = runs / name
+    d.mkdir(parents=True)
+    if marker:
+        tcm.write_marker(d, "123")
+    return d
+
+
+def _fake_modules():
+    from types import SimpleNamespace
+
+    def boom():
+        raise ValueError("torch < 2.6")
+    return {"transformers.trainer": SimpleNamespace(check_torch_load_is_safe=boom),
+            "transformers.utils.import_utils": SimpleNamespace(check_torch_load_is_safe=boom),
+            "transformers.utils": SimpleNamespace()}
+
+
+def test_own_checkpoint_needs_the_marker(tmp_path):
+    assert tcm.own_checkpoint(_ckpt(tmp_path), tmp_path)
+    assert not tcm.own_checkpoint(_ckpt(tmp_path, "x/checkpoint-3", marker=False), tmp_path)
+    bad = _ckpt(tmp_path, "y/checkpoint-3", marker=False)
+    (bad / tcm.MARKER).write_text('{"run_id": ""}')
+    assert not tcm.own_checkpoint(bad, tmp_path)
+    (bad / tcm.MARKER).write_text("not json")
+    assert not tcm.own_checkpoint(bad, tmp_path)
+
+
+def test_a_checkpoint_outside_the_runs_folder_is_refused_even_with_a_marker(tmp_path):
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    outside = _ckpt(tmp_path / "elsewhere")
+    assert not tcm.own_checkpoint(outside, runs)
+    assert not tcm.own_checkpoint(runs / ".." / "elsewhere" / "smoke-dpo" / "checkpoint-6", runs)
+    mods = _fake_modules()
+    with pytest.raises(SystemExit, match="refusing"):
+        tcm.resume_point(str(outside), runs, mods)
+    with pytest.raises(SystemExit, match="refusing"):
+        tcm.resume_point(str(_ckpt(runs, "r/checkpoint-1", marker=False)), runs, mods)
+    with pytest.raises(ValueError):
+        mods["transformers.trainer"].check_torch_load_is_safe()  # still the original guard
+
+
+def test_guard_is_patched_only_for_an_own_checkpoint_and_the_line_is_logged(tmp_path, capsys):
+    runs, mods = tmp_path / "runs", _fake_modules()
+    assert tcm.resume_point(None, runs, mods) is None  # fresh start: nothing patched
+    with pytest.raises(ValueError):
+        mods["transformers.trainer"].check_torch_load_is_safe()
+    ckpt = str(_ckpt(runs))
+    assert tcm.resume_point(ckpt, runs, mods) == ckpt
+    for name in ("transformers.trainer", "transformers.utils.import_utils"):
+        assert mods[name].check_torch_load_is_safe() is None
+    out = capsys.readouterr().out
+    assert f"[resume] from {ckpt} (own checkpoint, torch.load guard bypassed for optimizer/scheduler/rng state)" in out
+    assert "transformers.trainer.check_torch_load_is_safe" in out
+
+
+def test_resume_goes_on_when_no_guard_is_found(tmp_path, capsys):
+    ckpt = str(_ckpt(tmp_path))
+    assert tcm.resume_point(ckpt, tmp_path, {}) == ckpt
+    assert "no check_torch_load_is_safe found" in capsys.readouterr().out
+
+
+def test_saving_a_checkpoint_writes_the_marker(tmp_path, monkeypatch):
+    pytest.importorskip("transformers")
+    from types import SimpleNamespace
+    monkeypatch.setenv("SLURM_JOB_ID", "777")
+    (tmp_path / "checkpoint-3").mkdir()
+    tcm.callbacks(1.0).on_save(SimpleNamespace(output_dir=str(tmp_path)), SimpleNamespace(global_step=3), None)
+    assert tcm.own_checkpoint(tmp_path / "checkpoint-3", tmp_path)
+    assert '"777"' in (tmp_path / "checkpoint-3" / tcm.MARKER).read_text()

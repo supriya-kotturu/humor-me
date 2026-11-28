@@ -11,6 +11,8 @@ from explorer.chatml import IM_END, render_hf, render_ollama
 
 LORA = dict(r=16, lora_alpha=32, lora_dropout=0.05, target_modules="all-linear", bias="none", task_type="CAUSAL_LM")
 DEFAULT_BASE = "Qwen/Qwen3-4B-Instruct-2507"  # D-124
+RUNS_DIR = "data/dpo/train/runs"
+MARKER = "humor_checkpoint.json"  # written beside every checkpoint this job saves; resume refuses a folder without it
 NAN_STEPS = 5  # consecutive skipped fp16 steps (non-finite grad norm, finite loss) before a run is called unstable
 # Contractions, digits, accents, runs of spaces and ChatML tokens: where a changed pre-tokenizer regex would split differently.
 TOKEN_SAMPLE = ("<|im_start|>user\nI'm 37, can't stop: it's 3:45 p.m. and we'll see -- café mañana 12345.67!\n\n"
@@ -156,6 +158,55 @@ def unstable_advice(dtype: str) -> str:
     return "[stop] NaN in plain fp32, so not an fp16 overflow: lower LR= or check the data"
 
 
+def run_id() -> str:
+    return os.environ.get("SLURM_JOB_ID") or f"local-{os.getpid()}"
+
+
+def write_marker(ckpt_dir: str | os.PathLike, rid: str) -> None:
+    pathlib.Path(ckpt_dir, MARKER).write_text(json.dumps({"written_by": "humor-me explorer", "run_id": rid}), encoding="utf-8")
+
+
+def own_checkpoint(path: str | os.PathLike, runs: str | os.PathLike = RUNS_DIR) -> bool:
+    """True only for a folder inside `runs` (symlinks and `..` resolved) holding this job's marker with a run id."""
+    p, root = pathlib.Path(path).resolve(), pathlib.Path(runs).resolve()
+    if root != p and root not in p.parents:
+        return False
+    try:
+        meta = json.loads((p / MARKER).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(meta, dict) and bool(meta.get("run_id")) and meta.get("written_by") == "humor-me explorer"
+
+
+def patch_torch_load_guard(modules: dict | None = None) -> list[str]:
+    """Replaces every `check_torch_load_is_safe` that transformers 4.57.x's Trainer may call with a no-op, in the modules that
+    define or import it. Returns what was patched. Which one the Trainer uses depends on the release, so all are tried."""
+    mods = sys.modules if modules is None else modules
+    done = []
+    for name in ("transformers.trainer", "transformers.utils.import_utils", "transformers.utils"):
+        mod = mods.get(name)
+        if mod is not None and hasattr(mod, "check_torch_load_is_safe"):
+            mod.check_torch_load_is_safe = lambda: None
+            done.append(f"{name}.check_torch_load_is_safe")
+    return done
+
+
+def resume_point(ckpt: str | None, runs: str | os.PathLike = RUNS_DIR, modules: dict | None = None) -> str | None:
+    """The checkpoint to resume from (None: start fresh). transformers 4.57 refuses torch.load on torch < 2.6 (CVE-2025-32434,
+    about unpickling untrusted files) when it restores optimizer.pt, scheduler.pt and rng_state.pth, and the cluster's CUDA 12.3
+    driver rules out the cu124+ builds of torch 2.6. Those files were written by this job on this cluster, so the guard is
+    bypassed, but only for a checkpoint inside `runs` that carries this job's marker; anything else stops the run. The adapter
+    weights are safetensors and never went through the guard."""
+    if not ckpt:
+        return None
+    if not own_checkpoint(ckpt, runs):
+        raise SystemExit(f"[resume] refusing {ckpt}: not inside {runs} with a {MARKER} written by this job (delete it to start over)")
+    patched = patch_torch_load_guard(modules)
+    print(f"[resume] from {ckpt} (own checkpoint, torch.load guard bypassed for optimizer/scheduler/rng state)", flush=True)
+    print(f"[resume] guard patched in: {patched}" if patched else "[resume] no check_torch_load_is_safe found to patch; resume may fail on torch < 2.6", flush=True)
+    return ckpt
+
+
 def callbacks(max_hours: float, dtype: str = "fp16"):
     """NanRule (exit code 3 after the trainer returns), a line for every step the loss scaler skips, and save and stop before
     the job's time limit so a resubmit continues from the checkpoint."""
@@ -164,6 +215,9 @@ def callbacks(max_hours: float, dtype: str = "fp16"):
     class Guard(TrainerCallback):
         def __init__(self):
             self.start, self.nan, self.rule = time.time(), False, NanRule(NAN_STEPS if amp(dtype) else 1)
+
+        def on_save(self, args, state, control, **kw):
+            write_marker(os.path.join(args.output_dir, f"checkpoint-{state.global_step}"), run_id())
 
         def on_step_end(self, args, state, control, optimizer=None, **kw):
             # Runs before on_log for the same step; accelerate's optimizer wrapper knows whether the scaler skipped it.

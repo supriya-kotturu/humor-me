@@ -56,7 +56,7 @@ def main() -> None:
             tcm.inspect_tokens(tok, row[key], key, ends=key != "prompt_input_ids")
     if "chosen_input_ids" not in row:
         print(f"[inspect] TRL tokenizes later (columns {sorted(row)}): end token not checked here", flush=True)
-    trainer.train(resume_from_checkpoint=tcm.last_checkpoint(a.out))
+    trainer.train(resume_from_checkpoint=tcm.resume_point(tcm.last_checkpoint(a.out)))
     tcm.report_peak()
     trainer.save_model(a.out)
     if guard.nan:

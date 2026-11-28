@@ -259,6 +259,7 @@ Later, during the 90k extension run:
 
 | Problem | Cause | Fix |
 |---|---|---|
+| Smoke `dpo-B-resume` failed with "serious vulnerability issue in torch.load ... upgrade torch to at least v2.6" (2026-11-28) | transformers 4.57 restores optimizer, scheduler and rng state with `torch.load`, and refuses it on torch < 2.6 (CVE-2025-32434); the cluster driver (CUDA 12.3) needs cu121 builds, so no torch 2.6 | `resume_point` in `explorer/train_common.py` bypasses the check only for our own marked checkpoints inside `data/dpo/train/runs/`; the smoke shows `[resume] from ...` |
 | Exp 27 lost 5 of 40 bits to `ReadTimeout`, so the v2 bar ran on 15 prompts (2026-11-26) | A slow stretch of the laptop pushed writer calls past the bit's 12 s budget; a lost bit is stored, so `run` never retried it | Moved the 5 files aside (`data/thread_coherence/timed-out-bits-2026-11-26/`, not deleted) and ran again; chosen by the loss reason, not by any verdict. Rule for the 100-prompt extension is in D-111's addendum |
 | Python 3.13 venv creation failed | 3.13 registered with `py` launcher but its exe was missing | Use 3.14; revisit for audio/ML wheels in week 5 |
 | `pymupdf4llm` 2.x installed nothing | Empty wheel on Python 3.14 | Pinned 0.3.4 |

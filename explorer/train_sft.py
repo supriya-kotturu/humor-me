@@ -44,7 +44,7 @@ def main() -> None:
                          callbacks=[guard])
     tcm.check_trainable_fp32(trainer.model)
     tcm.inspect_tokens(tok, trainer.train_dataset[0]["input_ids"], "first example")
-    trainer.train(resume_from_checkpoint=tcm.last_checkpoint(a.out))
+    trainer.train(resume_from_checkpoint=tcm.resume_point(tcm.last_checkpoint(a.out)))
     tcm.report_peak()
     trainer.save_model(a.out)
     if guard.nan:

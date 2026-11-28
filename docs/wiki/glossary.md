@@ -177,6 +177,7 @@ Used in the safety filter ([wiki page](safety-filter.md), notebook Exp 19).
 | Term | Meaning here | Example |
 |---|---|---|
 | **Hard rule** | A safety rule that is never traded for a laugh: no jokes about bodies, appearance or protected attributes of people present, and no alcohol or sexual content for teens | The bar is 100% of hard-rule lines caught |
+| **Rules version** | A tag (`rules-v4`) for the rule layer's behaviour, bumped when a rule changes what it accepts, so stored verdicts from older rules can be found and redone. DPO pools keep the version they were written with | rules-v3 read `That's` after a quote as a name; rules-v4 does not (D-125) |
 | **Fail closed** | When the filter itself breaks, it says no. The opposite, failing open, would let a line through | A rule that raises an error rejects the line |
 | **Red-team list** | Lines written to break the filter, mild on purpose, each labelled with the rule it tests | 158 lines in `tests/red_team.yaml` |
 | **Held-out lines** | Test lines not looked at while writing the rules, so the score shows how the rules do on lines they weren't built for | The pass bar applies to these only |

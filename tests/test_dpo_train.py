@@ -122,6 +122,17 @@ def test_attach_raw_matches_by_parsed_content_and_leaves_a_thread_without_a_repl
     assert threads[0]["raw"] == good and "raw" not in threads[1]
 
 
+def test_attach_raw_gives_two_threads_that_parse_equal_one_reply_each():
+    lines = ["a.", "b.", "c.", "d.", "e."]
+    one, two = json.dumps({"premise": "p", "jokes": lines}), json.dumps({"premise": " p", "jokes": lines}, indent=1)
+    threads = [{"premise": "p", "lines": list(lines)}, {"premise": "p", "lines": list(lines)}]
+    dp.attach_raw(threads, [one, two])
+    assert sorted(t["raw"] for t in threads) == sorted([one, two])
+    third = [{"premise": "p", "lines": list(lines)} for _ in range(3)]
+    dp.attach_raw(third, [one, two])
+    assert [("raw" in t) for t in third] == [True, True, False]  # a reply is never used twice
+
+
 # --- the labeller --------------------------------------------------------------------------------------------------------
 
 def teach_pairs():

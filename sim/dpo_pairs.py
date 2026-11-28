@@ -404,23 +404,30 @@ class Capture:
             self.replies.append(str(reply))
         return reply
 
+    def taken(self) -> list[str]:
+        """The replies so far (a call that outlived the bit may still append one)."""
+        with self._lock:
+            return list(self.replies)
+
     def __getattr__(self, name):
         return getattr(self._client, name)
 
 
 def attach_raw(threads: list[dict], replies: list[str]) -> None:
-    """Gives each thread the reply that parses to it. A reply that does not parse (a bad shape that was asked again) matches no
-    thread; a thread with no match keeps no `raw`, and export skips it."""
-    parsed = {}
+    """Gives each thread a reply that parses to it, each reply used once: two threads that parse equal get the two replies,
+    not one twice. A reply that does not parse (a bad shape whose re-ask also failed) matches no thread; a thread with no
+    match keeps no `raw`, and export skips it. The re-ask sends the same request, so a re-asked reply is still a sample of
+    the stored prompt."""
+    parsed: dict[tuple, list[str]] = {}
     for text in replies:
         try:
             premise, lines = generate.parse(text)
         except generate.GenerationError:
             continue
-        parsed.setdefault((premise, tuple(lines)), text)
+        parsed.setdefault((premise, tuple(lines)), []).append(text)
     for t in threads:
-        if (raw := parsed.get((t["premise"], tuple(t["lines"])))) is not None:
-            t["raw"] = raw
+        if left := parsed.get((t["premise"], tuple(t["lines"]))):
+            t["raw"] = left.pop(0)
 
 
 def check_threads(threads: list[dict], live_safety, age: str) -> bool:
@@ -456,7 +463,7 @@ def write_bit(client, live_safety, prompt: dict, days: dict[str, dict]) -> dict:
         rec["request"], rec["lost"] = request, list(lost)
         rec["threads"] = [{"premise": premises[i], "lines": [lines_major[j][i] for j in range(generate.JOKES)]}
                           for i in range(len(premises))]
-        attach_raw(rec["threads"], cap.replies)
+        attach_raw(rec["threads"], cap.taken())
     rec["wall_s"] = time.perf_counter() - start
     rec["bad_replies"] = client.bad_replies - bad0
     rec["digest"] = request_digest(rec["request"] or "", gen.generator_id, client.model)
@@ -551,7 +558,7 @@ def topup_bit(client, live_safety, rec: dict, prompt: dict, days: dict[str, dict
     batch = len(rec.get("topups", [])) + 1
     new = [{"premise": premises[i], "lines": [lines_major[j][i] for j in range(generate.JOKES)], "batch": batch}
            for i in range(len(premises))]
-    attach_raw(new, cap.replies)
+    attach_raw(new, cap.taken())
     if check_threads(new, live_safety, prompt["context"]["age"]):
         return None
     out = dict(rec)

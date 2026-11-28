@@ -72,8 +72,15 @@ def written_bits(split: str, writer: str, pool: dict, root: pathlib.Path) -> lis
     return out
 
 
-def call_path(directory: pathlib.Path, bit: str, i: int, j: int, order: str) -> pathlib.Path:
-    return directory / f"{bit}-{i}-{j}-{order}.json"
+def cache_dir(root: pathlib.Path, split: str, writer: str, system: str) -> pathlib.Path:
+    """One folder per teach prompt and judge (the digest), then per writer's bits: two writers' bits share ids, not threads."""
+    return labels_dir(root) / "cache" / dp.judge_digest(system, "haiku") / dp.bits_folder(split, writer)
+
+
+def call_path(directory: pathlib.Path, rec: dict, i: int, j: int, order: str) -> pathlib.Path:
+    """The file name carries a hash of the two threads' lines, so an answer is only ever read back for the text it judged."""
+    text = json.dumps([rec["threads"][i]["lines"], rec["threads"][j]["lines"]], ensure_ascii=False)
+    return directory / f"{rec['id']}-{i}-{j}-{order}-{hashlib.sha256(text.encode()).hexdigest()[:8]}.json"
 
 
 def make_label_client():
@@ -115,9 +122,9 @@ def label_all(client, split: str, writer: str, pairs: list[dict], pool: dict, ro
     in a row, or `limit` new calls. Returns {"calls", "cost_usd", "total_cost_usd"}."""
     root = root or dp.DATA
     system = dp.teach_prompt(pairs)
-    directory = labels_dir(root) / "cache" / dp.judge_digest(system, "haiku")
+    directory = cache_dir(root, split, writer, system)
     todo = [(p["id"], rec, i, j, order) for p, rec in written_bits(split, writer, pool, root) for i, j in thread_pairs(rec)
-            for order in dp.ORDERS if dp._read(call_path(directory, p["id"], i, j, order)) is None]
+            for order in dp.ORDERS if dp._read(call_path(directory, rec, i, j, order)) is None]
     if limit is not None:
         todo = todo[:limit]
     out(estimate(len(todo), system))
@@ -138,8 +145,8 @@ def label_all(client, split: str, writer: str, pairs: list[dict], pool: dict, ro
             failed += 1
             return failed < FAIL_STOP
         failed = 0
-        bit, _, i, j, order = item
-        dp._write(call_path(directory, bit, i, j, order), {"funnier": letter})
+        _, rec, i, j, order = item
+        dp._write(call_path(directory, rec, i, j, order), {"funnier": letter})
         made += 1
         if made % 50 == 0:
             out(f"{made} calls, ${cost_usd(usage_of(client)):.3f} so far")
@@ -169,11 +176,11 @@ def label_all(client, split: str, writer: str, pairs: list[dict], pool: dict, ro
 def collect_labels(split: str, writer: str, pool: dict, root: pathlib.Path, pairs: list[dict]) -> list[dict]:
     """One row per pair: its winner when Haiku named the same thread in both orders, `dropped` when the orders disagree,
     `missing` when an order has no answer yet. Rows are in pool order, then thread order, so the file is deterministic."""
-    directory = labels_dir(root) / "cache" / dp.judge_digest(dp.teach_prompt(pairs), "haiku")
+    directory = cache_dir(root, split, writer, dp.teach_prompt(pairs))
     rows = []
     for p, rec in written_bits(split, writer, pool, root):
         for i, j in thread_pairs(rec):
-            letters = {o: (dp._read(call_path(directory, p["id"], i, j, o)) or {}).get("funnier") for o in dp.ORDERS}
+            letters = {o: (dp._read(call_path(directory, rec, i, j, o)) or {}).get("funnier") for o in dp.ORDERS}
             picks = [dp.picked_thread(letters[o], o) for o in dp.ORDERS]
             if None in picks:
                 status, winner = "missing", None
@@ -249,7 +256,7 @@ def export_b(rows: list[dict], bits: dict[str, dict]) -> tuple[list[dict], list[
     """(sft rows, dpo rows, counts) for writer B from the labels. A thread with no stored reply cannot be a target: its rows are
     skipped and counted."""
     sft, dpo = [], []
-    no_raw = 0
+    no_raw = same = 0
     for r in rows:
         if r["status"] != "label":
             continue
@@ -257,6 +264,9 @@ def export_b(rows: list[dict], bits: dict[str, dict]) -> tuple[list[dict], list[
         win, lose = (rec["threads"][k] for k in (r["winner"], r["j"] if r["winner"] == r["i"] else r["i"]))
         if reply_text(win) is None or reply_text(lose) is None:
             no_raw += 1
+            continue
+        if reply_text(win) == reply_text(lose):  # two samples that came out the same: no preference to learn
+            same += 1
             continue
         dpo.append({"id": f"{r['bit']}-{r['i']}-{r['j']}", "prompt": split_request(rec["request"]), "chosen": reply_text(win),
                     "rejected": reply_text(lose)})
@@ -268,7 +278,7 @@ def export_b(rows: list[dict], bits: dict[str, dict]) -> tuple[list[dict], list[
             no_raw += 1
             continue
         sft.append({"id": bit, "prompt": split_request(bits[bit]["request"]), "completion": reply_text(bits[bit]["threads"][k])})
-    return sft, dpo, {"sft": len(sft), "dpo": len(dpo), "skipped_no_reply": no_raw}
+    return sft, dpo, {"sft": len(sft), "dpo": len(dpo), "skipped_no_reply": no_raw, "skipped_identical": same}
 
 
 def export_c(pool: dict, state: dict, root: pathlib.Path) -> tuple[list[dict], dict]:

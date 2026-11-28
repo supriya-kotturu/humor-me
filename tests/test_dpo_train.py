@@ -219,6 +219,21 @@ def test_label_cache_is_its_own_and_keyed_by_what_the_judge_was_taught(pool, wri
     assert len(again.calls) == 18 and len(list((written / "labels" / "cache").iterdir())) == 2
 
 
+def test_label_cache_never_answers_for_another_writers_bit_with_the_same_id(pool, written):
+    dt.label_all(FakeJudge(), "train", QWEN, teach_pairs(), pool, written, out=lambda *_: None)
+    for p in train_prompts(pool, 3):  # bonsai's bits: same ids and thread numbers, other text
+        rec = bit_record(p, n_threads=4, writer=llm.OLLAMA_MODEL)
+        for t in rec["threads"]:
+            t["lines"] = [x.replace(" line ", " other line ") for x in t["lines"]]
+        dp._write(dp.bit_path(written, "train", p["id"], llm.OLLAMA_MODEL), rec)
+    bonsai = FakeJudge()
+    bonsai.chat = lambda system, user, **kw: (bonsai.calls.append(user), json.dumps({"funnier": "B"}))[1]
+    dt.label_all(bonsai, "train", llm.OLLAMA_MODEL, teach_pairs(), pool, written, out=lambda *_: None)
+    assert len(bonsai.calls) == 18  # nothing read from the qwen3 answers
+    assert all(r["status"] == "dropped" for r in dt.read_jsonl(dt.label_file(written, "train", llm.OLLAMA_MODEL)))
+    assert all(r["status"] == "label" for r in dt.read_jsonl(dt.label_file(written, "train", QWEN)))
+
+
 def test_label_prints_the_cost_and_keeps_a_running_total_across_runs(pool, written):
     lines = []
     judge = FakeJudge()
@@ -279,7 +294,7 @@ def test_export_b_uses_the_raw_reply_as_the_assistant_text(pool, exported):
     assert sft[0]["completion"] == bit["threads"][0]["raw"]  # thread 0 wins most pairs
     assert [m["role"] for m in sft[0]["prompt"]] == ["system", "user"] and sft[0]["prompt"][0]["content"].startswith("SYSTEM TEXT\n\nline two")
     assert sft[0]["prompt"][1]["content"].startswith('{"venue"')
-    assert len(sft) == 3 and len(dpo) == 9 and manifest["B"] == {"sft": 3, "dpo": 9, "skipped_no_reply": 0}
+    assert len(sft) == 3 and len(dpo) == 9 and manifest["B"] == {"sft": 3, "dpo": 9, "skipped_no_reply": 0, "skipped_identical": 0}
     for row in dpo:
         pid, i, j = row["id"].rsplit("-", 2)[0], *map(int, row["id"].rsplit("-", 2)[1:])
         t = dp._read(dp.bit_path(root, "train", pid, QWEN))["threads"]
@@ -302,7 +317,7 @@ def test_a_thread_without_a_stored_reply_is_skipped_and_counted(pool, written):
     del rec["threads"][0]["raw"]
     rows = [{"bit": p["id"], "i": 0, "j": 1, "status": "label", "winner": 1}, {"bit": p["id"], "i": 1, "j": 2, "status": "label", "winner": 1}]
     sft, dpo, counts = dt.export_b(rows, {p["id"]: rec})
-    assert counts == {"sft": 1, "dpo": 1, "skipped_no_reply": 1} and sft[0]["completion"] == rec["threads"][1]["raw"]
+    assert counts == {"sft": 1, "dpo": 1, "skipped_no_reply": 1, "skipped_identical": 0} and sft[0]["completion"] == rec["threads"][1]["raw"]
 
 
 def test_export_c_is_the_users_decided_pairs_with_the_prompt_rebuilt_from_the_stored_request(pool, exported):
@@ -396,3 +411,12 @@ def test_the_command_line_writes_a_modelfile_and_prints_the_power_table(tmp_path
     monkeypatch.setattr(sys, "argv", ["dpo_pairs", "eval", "power"])
     dp.main()
     assert "at least 10" in capsys.readouterr().out
+
+
+def test_a_pair_of_identical_replies_is_not_a_dpo_row(pool):
+    p = train_prompts(pool, 1)[0]
+    rec = bit_record(p)
+    rec["threads"][1] = dict(rec["threads"][0])
+    rows = [{"bit": p["id"], "i": 0, "j": 1, "status": "label", "winner": 0}, {"bit": p["id"], "i": 0, "j": 2, "status": "label", "winner": 0}]
+    _, dpo, counts = dt.export_b(rows, {p["id"]: rec})
+    assert [r["id"] for r in dpo] == [f"{p['id']}-0-2"] and counts["skipped_identical"] == 1

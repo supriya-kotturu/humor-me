@@ -20,6 +20,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 SRC = ROOT / "docs" / "wiki"
 BLOB = "https://github.com/supriya-kotturu/humor-me/blob/main/"
 LINK = re.compile(r"\]\(([^)\s]+)\)")
+IMAGE = re.compile(r"(!\[[^\]]*\]\()([^)\s]+)\)")
 FOOTER = ("Generated from [`docs/wiki/`](" + BLOB + "docs/wiki) by `scripts/sync_wiki.py`. "
           "Edit there through a PR; changes made here are overwritten on the next sync.\n")
 
@@ -42,8 +43,15 @@ def rewrite_link(target: str, names: dict[str, str], src_dir: str = "docs/wiki")
     return BLOB + resolved + suffix
 
 
+def image_src(target: str, names: dict[str, str]) -> str:
+    """A blob URL serves an HTML page, so an inline image needs the raw file."""
+    url = rewrite_link(target, names)
+    return url + "?raw=true" if url.startswith(BLOB) else url
+
+
 def convert(text: str, names: dict[str, str]) -> str:
     body = text.split("\n", 1)[1].lstrip("\n") if text.startswith("# ") else text  # wiki shows the title
+    body = IMAGE.sub(lambda m: f"{m.group(1)}{image_src(m.group(2), names)})", body)
     return LINK.sub(lambda m: f"]({rewrite_link(m.group(1), names)})", body)
 
 

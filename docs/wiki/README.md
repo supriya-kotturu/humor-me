@@ -25,6 +25,7 @@ how that maps to a learning problem → how we test it.
 | 7 | [Safety filter](safety-filter.md) | Show loop, last gate before the voice | Rules for the hard invariants, failing closed, and how recall is measured on held-out lines |
 | 8 | [Material](material.md) | Writer input, before the safety filter | Why each bit gets a topic and two robot facts, and how we test that it stops the hardware jokes |
 | 9 | [Tonight's context](tonight.md) | Writer input, before the safety filter | Why the writer gets today's headlines, the market and one line, how names and tragedies stay out, and how we test it |
+| 10 | [Training the writer](dpo.md) | Model track | SFT and DPO of the local writer, what each of the three trained writers is trained toward, and how Exp 38 tests them |
 | – | [Glossary](glossary.md) | Everywhere | Shared vocabulary: comedy units, agent roles, learning and evaluation terms |
 
 ```mermaid

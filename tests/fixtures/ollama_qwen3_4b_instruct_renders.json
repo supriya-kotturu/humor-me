@@ -1,0 +1,6 @@
+{
+  "system_user": "\u003c|im_start|\u003esystem\nSYS line one.\nLine two.\n\n\u003c|im_end|\u003e\n\u003c|im_start|\u003euser\n{\"venue\": \"bar\"}\u003c|im_end|\u003e\n\u003c|im_start|\u003eassistant\n",
+  "system_user_assistant": "\u003c|im_start|\u003esystem\nSYS\n\n\u003c|im_end|\u003e\n\u003c|im_start|\u003euser\nU1\u003c|im_end|\u003e\n\u003c|im_start|\u003eassistant\nA1",
+  "system_user_asst_user": "\u003c|im_start|\u003esystem\nSYS\n\n\u003c|im_end|\u003e\n\u003c|im_start|\u003euser\nU1\u003c|im_end|\u003e\n\u003c|im_start|\u003eassistant\nA1\u003c|im_end|\u003e\n\u003c|im_start|\u003euser\nU2\u003c|im_end|\u003e\n\u003c|im_start|\u003eassistant\n",
+  "user_only": "\u003c|im_start|\u003euser\nhi\u003c|im_end|\u003e\n\u003c|im_start|\u003eassistant\n"
+}

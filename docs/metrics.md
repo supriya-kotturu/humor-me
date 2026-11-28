@@ -1179,6 +1179,31 @@ Caveats:
 - You agree with yourself on 12 of 20 re-ranked pairs (60%, likely range 39% to 78%; 12 of 17, 71%, ignoring ties), so a perfect copy of your taste would match one answer only about 72% to 82% of the time (p^2 + (1-p)^2 model, a judgment call). The judges at 52% and 47% sit below that, but 20 pairs leave the ranges overlapping. On the 10 test pairs among the 20, Opus agreed in both orders on 4 (2 had orders disagreeing). Both verdicts are unchanged.
 - Re-rank timing: median 62 s per answer (gaps between consecutive answers), 31 minutes first to last. These were pairs you had already read once, so this does not estimate first-time ranking, which you report took far longer.
 
+## Is a trained writer funnier than the base? (Exp 38)
+
+Decision: [D-123](agent/decisions-detail.md#d-123) (the model is chosen in [D-124](agent/decisions-detail.md#d-124)). Raw: `reports/metrics/dpo_eval.json` (written by `python -m sim.dpo_pairs eval score --record`; numbers only). Code: `sim/dpo_eval.py`.
+
+**Status: pending.** Nothing is trained yet. This section fills in after the user runs the training jobs and votes.
+
+What it tests: three writers start from the same base model. **A** is the base, **B** is trained toward Claude Haiku's taste (a judge's, not the audience's), **C** is trained on your own 120 pairs. Each writes one bit for each of 60 new prompts. You vote blind on 30 pairs: 15 of B against A and 15 of C against A. Opus 5.5 judges all three pairings (B against C too) on all 60 prompts; that is reported only. Haiku is reported too, but it wrote B's training labels, so for B it is marking its own homework.
+
+**The win bar is fixed: at least 10 wins out of 15 decided pairs in a comparison** (your choice, 2026-11-27, before any vote; 15 pairs per writer kept). Lock it in the tool with `eval bar --wins 10` before the first vote. The re-rank says your votes are noisy: you repeat a pick 60% of the time, so a writer you truly prefer 75% of the time shows up winning only about 61% to 66% of votes, and reaches 10 of 15 only 43% to 60% of the time. Read the columns below as true rates, which the votes will understate.
+
+| Bar (wins of 15 decided) | A coin flip gets there | A writer that truly wins 65% | 70% | 75% |
+|---|---|---|---|---|
+| at least 9 | 30.4% | 75.5% | 86.9% | 94.3% |
+| **at least 10 (proposed)** | **15.1%** | 56.4% | 72.2% | 85.2% |
+| at least 11 | 5.9% | 35.2% | 51.5% | 68.6% |
+| at least 12 | 1.8% | 17.3% | 29.7% | 46.1% |
+
+Two comparisons share one base, so a coin-flip writer clears "at least 10" in one of them 27.9% of the time (11.5% at "at least 11"). Ties are left out of the count, so with 12 decided pairs the same bar is harder: a coin flip gets there 1.9% of the time and a writer that truly wins 70% only 25%. Fifteen pairs cannot see a small real gain: "not met" means "not shown", not "not better".
+
+**Speed has its own bar.** Each writer's bit time on the laptop, median and slowest 5% of its 60 bits, against bonsai's (Exp 26: median 3.5 s, slowest 5% 5.1 s) and the live budget of 12 s. B and C pass when their slowest 5% is within the budget and at most 5% of their threads ran out of time (a slow call is dropped at the budget, so bit time alone would hide it). Exp 24 timed qwen3:4b-instruct at 6.7 s median and 8.2 s slowest 5% with the older one-call generator, bonsai at 5.2 s and 6.9 s.
+
+**Training pool.** B is trained on the pool after `reflag` (rules-v4, D-125), so threads the old name check wrongly rejected are in; the manifest says how many pairs came from them (D-123).
+
+**Cost.** Labelling B's pairs with Haiku: about $1.3 with caching (at most 4,800 calls), about $12 without (the teach prompt is about 24,100 tokens, measured in Exp 37). Opus's reading of Exp 38: 360 calls, about $2.7 (Exp 37 cost $0.91 for 120).
+
 ## Do other people pick like you, or like the judges? (Exp 39)
 
 Decision: [D-122](agent/decisions-detail.md#d-122), evidence only. Raw: `reports/metrics/dpo_friend.json` (numbers only). Code: `sim/dpo_friend.py`.

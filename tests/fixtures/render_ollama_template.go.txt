@@ -1,0 +1,55 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+	"text/template"
+)
+
+type Msg struct {
+	Role      string
+	Content   string
+	ToolCalls []string
+}
+
+func collate(in []Msg) (string, []*Msg) {
+	var sys []string
+	var out []*Msg
+	for i := range in {
+		if in[i].Role == "system" {
+			sys = append(sys, in[i].Content)
+		}
+		if len(out) > 0 && out[len(out)-1].Role == in[i].Role {
+			out[len(out)-1].Content += "\n\n" + in[i].Content
+			continue
+		}
+		m := in[i]
+		out = append(out, &m)
+	}
+	return strings.Join(sys, "\n\n"), out
+}
+
+func main() {
+	b, _ := os.ReadFile("template.txt")
+	t := template.Must(template.New("t").Parse(string(b)))
+	cases := map[string][]Msg{
+		"system_user":            {{Role: "system", Content: "SYS line one.\nLine two."}, {Role: "user", Content: "{\"venue\": \"bar\"}"}},
+		"user_only":              {{Role: "user", Content: "hi"}},
+		"system_user_assistant":  {{Role: "system", Content: "SYS"}, {Role: "user", Content: "U1"}, {Role: "assistant", Content: "A1"}},
+		"system_user_asst_user":  {{Role: "system", Content: "SYS"}, {Role: "user", Content: "U1"}, {Role: "assistant", Content: "A1"}, {Role: "user", Content: "U2"}},
+	}
+	out := map[string]string{}
+	for k, msgs := range cases {
+		sys, ms := collate(msgs)
+		var sb strings.Builder
+		err := t.Execute(&sb, map[string]any{"System": sys, "Messages": ms, "Tools": []string(nil), "Response": ""})
+		if err != nil {
+			panic(err)
+		}
+		out[k] = sb.String()
+	}
+	j, _ := json.MarshalIndent(out, "", "  ")
+	fmt.Println(string(j))
+}

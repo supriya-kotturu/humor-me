@@ -405,9 +405,11 @@ class LiveSafety:
         return safety.check_rules(text, age, self.allow_caps, *self._people())
 
 
-def writer_client() -> llm.Client:
-    """The show's joke-writer client, exactly as a show builds it (Exp 26 times this one)."""
-    return llm.from_env(GENERATOR_TIMING[0], role="joke_writer", retries=RETRIES, deadline_s=GENERATOR_TIMING[1])
+def writer_client(model: str | None = None) -> llm.Client:
+    """The show's joke-writer client, exactly as a show builds it (Exp 26 times this one). `model` names another model on
+    the same provider (D-123: the pool tools write with the training base, the eval with each trained writer); the
+    request it sends is the live one, only the model field differs."""
+    return llm.from_env(GENERATOR_TIMING[0], role="joke_writer", retries=RETRIES, deadline_s=GENERATOR_TIMING[1], model=model)
 
 
 def _show_material() -> "material_mod.ShowMaterial | None":

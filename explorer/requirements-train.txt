@@ -1,0 +1,12 @@
+# Training stack for D-123 (SFT and DPO of the writer), installed into the SAME venv as requirements-cluster.txt (torch 2.5.1+cu121,
+# transformers 4.57.x). The constraint flag keeps these from replacing that torch. Install, as a batch job like the first one:
+#   uv pip install -r explorer/requirements-train.txt -c explorer/requirements-cluster.txt --index-strategy unsafe-best-match
+# smoke.sbatch prints every version it ended up with.
+trl>=0.24,<1.17
+accelerate>=1.10.1,<1.16
+peft==0.17.1
+datasets>=3.0,<5
+# merge_gguf.sbatch: llama.cpp's converter reads the merged model through these.
+gguf>=0.17
+sentencepiece>=0.2
+protobuf>=4.25

@@ -28,3 +28,11 @@ def test_convert_drops_the_h1_and_rewrites_inline():
     assert not out.startswith("# ")
     assert "[bandits](Contextual-bandits)" in out
     assert f"[log]({BLOB}docs/dev-log.md)" in out
+
+
+def test_inline_images_point_at_the_raw_file_and_links_to_images_stay_blob():
+    out = convert("# Page\n\n![table](../../reports/figures/dpo/b.png)\n\n[log](../../reports/figures/dpo/a.png)\n"
+                  "![ext](https://example.com/x.png)\n", NAMES)
+    assert f"![table]({BLOB}reports/figures/dpo/b.png?raw=true)" in out
+    assert f"[log]({BLOB}reports/figures/dpo/a.png)" in out
+    assert "![ext](https://example.com/x.png)" in out

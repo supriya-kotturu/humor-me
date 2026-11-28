@@ -69,6 +69,18 @@ Annotated logs: [start of training](../../reports/figures/dpo/dpo-C-training-sta
 
 SFT on 728 judge-chosen threads, 2 passes, 16 minutes: loss 0.96 to 0.51, tokens predicted right 76% to about 81%, and entropy 0.98 to 0.54. Lower entropy means more confident, less varied word choices, the usual cost of SFT; check B's bits for repetition. SFT's learning rate peaks 10 times higher than DPO's: 1 × 10⁻⁴ (0.0001) after a warm-up of about 9 of 182 steps, decaying to 7.5 × 10⁻⁸ by the end. [Annotated log](../../reports/figures/dpo/sft-B-training-log.png).
 
+## Reading a training run (writer B's DPO)
+
+DPO on top of B's SFT copy, one pass over the pairs, 186 steps, 22 minutes of training (32 for the whole job). The estimate was 3 to 6 hours.
+
+- Loss 0.69 to 0.55 on average, and 0.14 at the last step. Reward accuracy ends between 0.75 and 1.0.
+- The learning rate follows C's shape: 0 at step 1, a peak of 1 × 10⁻⁵ (0.00001) after about 19 steps, and 8.0 × 10⁻⁹ at the end.
+- The fp16 scaler skipped steps 5 and 36 (`grad_norm` nan, loss fine). That is normal; training went on.
+- **Unlike C, both rewards fall.** C made the chosen bit more likely and the rejected one less. B makes both less likely than its SFT copy, the rejected one much more. DPO only rewards the gap, so this still counts as learning, but if it goes too far the writing gets worse. Writer B's eval bits (step 13) and the vote will show it.
+- Peak GPU memory 8.8 GiB of 32.
+
+Annotated logs: [start of training](../../reports/figures/dpo/dpo-B-training-start.png), [end of training](../../reports/figures/dpo/dpo-B-training-log.png). Job results: [sacct](../../reports/figures/dpo/dpo-B-sacct.png); the two GGUF files have different hashes, so B and C are different models: [hashes](../../reports/figures/dpo/gguf-hashes.png).
+
 ## Going deeper
 
 - [Direct Preference Optimization](https://arxiv.org/abs/2305.18290) (Rafailov et al., 2023): the method.

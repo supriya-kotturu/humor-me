@@ -209,6 +209,15 @@ test 39,644). 75% carry no topic flag; scores are heavy at 0 (35%).
 
 ## Explorer cluster setup (2026-10-31)
 
+### First training smoke (2026-11-27, D-123)
+
+| Problem | Cause | Fix |
+|---|---|---|
+| DPO smoke stopped at step 1: `[stop] grad_norm is nan` with loss 0.6931 and learning rate 0.0 | Under fp16 the loss scaler starts at 65536 and skips a step whose gradients overflow; Hugging Face logs that step's grad norm as nan. Our stop fired on any NaN grad norm, so it stopped on a normal skip (the rerun will confirm) | Stop on a NaN loss at once, but on a NaN grad norm only after 5 logged steps in a row; print each skip and the new scale; `DTYPE=fp32` is now plain fp32 (`train_common.NanRule`) |
+| "The tokenizer you are loading from 'data/dpo/train/runs/smoke-merged' with an incorrect regex pattern ... set `fix_mistral_regex=True`" | transformers 4.57.x's Mistral check returns early for non-Mistral models only if the folder's config.json came from an older release; a folder saved by 4.57.6 is warned about whatever the model. The flag would swap in Mistral's pre-tokenizer and change Qwen's ids | Never set the flag; load the tokenizer from the base model id everywhere (`tokenizer_source`); the smoke job checks the ids on a fixed sample |
+
+### Labelling smoke (2026-10-31)
+
 Getting one 50-joke labeling smoke test to run took most of a day. In order:
 
 | Problem | Cause | Fix |

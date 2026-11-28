@@ -21,7 +21,8 @@ def main() -> None:
     model = AutoModelForCausalLM.from_pretrained(a.base, torch_dtype=torch.float16, device_map="cuda" if a.device == "cuda" else None)
     merged = PeftModel.from_pretrained(model, a.adapter).merge_and_unload()
     merged.save_pretrained(a.out, safe_serialization=True)
-    AutoTokenizer.from_pretrained(a.base).save_pretrained(a.out)
+    # The base model's tokenizer, also when --base is a merged folder (B's DPO): merging never changes it (tcm.tokenizer_source).
+    AutoTokenizer.from_pretrained(tcm.tokenizer_source(a.base)).save_pretrained(a.out)
     print(f"merged {a.adapter} into {a.base} -> {a.out}", flush=True)
 
 

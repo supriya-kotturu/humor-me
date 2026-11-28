@@ -22,7 +22,7 @@ def main() -> None:
     ap.add_argument("--max-steps", type=int, default=-1, help="the smoke test sets 10")
     ap.add_argument("--max-hours", type=float, default=7.5, help="save and stop this long after the start (the job limit is 8 h)")
     ap.add_argument("--save-steps", type=int, default=25)
-    ap.add_argument("--dtype", default="fp16", choices=("fp16", "fp32"), help="base weights; fp32 if fp16 stops on a NaN")
+    ap.add_argument("--dtype", default="fp16", choices=("fp16", "fp32"), help="fp16: fp16 weights, mixed precision; fp32: plain fp32, the fallback when fp16 keeps overflowing")
     a = ap.parse_args()
     from datasets import Dataset
     from peft import LoraConfig
@@ -36,10 +36,10 @@ def main() -> None:
     cfg = SFTConfig(**tcm.config_kwargs(SFTConfig, dict(
         output_dir=a.out, learning_rate=a.lr, num_train_epochs=a.epochs, max_steps=a.max_steps, per_device_train_batch_size=1,
         gradient_accumulation_steps=a.accum, gradient_checkpointing=True, gradient_checkpointing_kwargs={"use_reentrant": False},
-        fp16=True, logging_steps=1, save_steps=a.save_steps, save_total_limit=2, report_to="none", seed=0, max_grad_norm=1.0,
+        fp16=tcm.amp(a.dtype), logging_steps=1, save_steps=a.save_steps, save_total_limit=2, report_to="none", seed=0, max_grad_norm=1.0,
         warmup_ratio=0.05, lr_scheduler_type="cosine", max_length=a.max_length, completion_only_loss=True,
         dataloader_num_workers=0)))
-    guard = tcm.callbacks(a.max_hours)
+    guard = tcm.callbacks(a.max_hours, a.dtype)
     trainer = SFTTrainer(model=model, args=cfg, train_dataset=data, processing_class=tok, peft_config=LoraConfig(**tcm.LORA),
                          callbacks=[guard])
     tcm.check_trainable_fp32(trainer.model)

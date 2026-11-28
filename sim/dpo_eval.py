@@ -18,7 +18,8 @@ each answer stamped. B against C is judged by Opus only. The win bar is fixed by
 (D-123 proposes one and computes its power); a trained writer passes when it wins at least that many pairs of its 15 and nothing
 else. Judges (Opus 5.5 with the 60 teach pairs, both orders, every eval prompt) are reported only; Haiku labelled B's training
 pairs, so its read of B is circular and says so. Latency: each writer's bit time (median, slowest 5%) against the live
-per-bit budget; B and C pass when their slowest 5% is within it.
+per-bit budget; B and C pass when their slowest 5% is within it and at most 5% of their threads were lost to the clock (a slow
+call is dropped at the budget, so bit time alone would hide a writer too slow to finish).
 """
 import datetime
 import hashlib
@@ -46,7 +47,10 @@ VOTE_SEED = "dpo-eval-vote-v1"
 PATTERN = ("B", "C", "C", "B")  # comparison of the next ready prompt, so each half is shared between B and C
 PROPOSED_WINS = 10  # D-123's proposal, NOT in force until the user runs `eval bar`
 LEVELS = (0.65, 0.70, 0.75)  # how often the trained writer would truly win a decided pair
-LATENCY_BAR = "p95 bit time within generate.GENERATOR_TIMING[1] (the live per-bit budget)"
+LATENCY_BAR = ("p95 bit time within generate.GENERATOR_TIMING[1] (the live per-bit budget) and at most 5% of threads lost to time "
+               "(a call that runs out of budget is dropped, so the bit time alone can never exceed the budget)")
+MAX_TIMED_OUT = 0.05  # judgment call, not measured: share of a writer's threads that may be lost to the clock
+TIME_MARKS = ("outlived the bit's budget", "deadline passed", "Timeout", "no time left")
 
 
 def eval_dir(root: pathlib.Path) -> pathlib.Path:
@@ -184,6 +188,16 @@ def read_votes(root: pathlib.Path) -> dict:
     return dp._read(vote_path(root)) or {"seed": VOTE_SEED, "answers": {}}
 
 
+def frozen_plan(items: list[dict]) -> list[dict]:
+    """What the first vote fixes: each pair's key, side and a hash of the lines shown."""
+    return [{"key": vote_key(i), "trained_left": i["trained_left"],
+             "sha": hashlib.sha256(json.dumps([i["left"], i["right"]], ensure_ascii=False).encode()).hexdigest()[:8]} for i in items]
+
+
+def plan_changed(items: list[dict], state: dict) -> bool:
+    return "plan" in state and state["plan"] != frozen_plan(items)
+
+
 def vote(items: list[dict], root: pathlib.Path, limit: int | None = None, read=input, out=print) -> int:
     """Asks the unanswered pairs in order: 1, 2, t (tie) or q. No skip. Saves after every answer (stamped), never shows which
     writer is which or the running tally. Returns the number answered so far."""
@@ -192,6 +206,11 @@ def vote(items: list[dict], root: pathlib.Path, limit: int | None = None, read=i
     if len(items) < 2 * N_VOTE:
         raise SystemExit(f"only {len(items)} of {2 * N_VOTE} pairs are ready: write the eval bits of every writer first (`eval plan`)")
     state = read_votes(root)
+    # The plan is rebuilt from the bits on every run; a bit written or rewritten after voting began would re-deal prompts
+    # between B and C or change the lines behind an answer. So the first vote fixes it, and any later change stops the vote.
+    if plan_changed(items, state):
+        raise SystemExit("the eval bits changed after voting began (the plan of pairs is not the one voted on): restore them")
+    state.setdefault("plan", frozen_plan(items))
     asked = 0
     for item in items:
         key = vote_key(item)
@@ -317,10 +336,12 @@ def latency(prompts: list[dict], root: pathlib.Path) -> dict:
         recs = [r for p in prompts if (r := bit_of(root, w, p["id"])) is not None]
         walls = [r["wall_s"] for r in recs]
         row = {"bits": len(recs)}
+        timed_out = sum(any(m in reason for m in TIME_MARKS) for r in recs for reason in r.get("lost", []))
         if walls:
             row |= {"p50_s": round(statistics.median(walls), 2), "p95_s": round(cg.percentile(walls, 95), 2),
-                    "max_s": round(max(walls), 2), "bits_losing_a_thread": sum(len(r["threads"]) < generate.K for r in recs)}
-            row["within_budget"] = row["p95_s"] <= budget
+                    "max_s": round(max(walls), 2), "bits_losing_a_thread": sum(len(r["threads"]) < generate.K for r in recs),
+                    "threads_lost_to_time": timed_out, "share_lost_to_time": round(timed_out / (len(recs) * generate.K), 4)}
+            row["within_budget"] = row["p95_s"] <= budget and row["share_lost_to_time"] <= MAX_TIMED_OUT
         out["writers"][k] = row
     return out
 
@@ -353,6 +374,7 @@ def score(root: pathlib.Path | None = None) -> dict:
     items = plan(prompts, root)
     pool, _, pairs = dp.need_pairs(root)
     res = {"status": "pending" if len(state["answers"]) < 2 * N_VOTE or bar is None else "done", "bar": bar,
+           "plan_changed_after_voting": plan_changed(items, state),
            "proposed_wins": PROPOSED_WINS, "votes": tally(items, state, bar) if items else None, "latency": latency(prompts, root),
            "judges": {w: judge_tally(pairs, prompts, root, w) for w in ("opus", "haiku")},
            "judge_note": "reported only; haiku labelled B's training pairs, so its read of B is circular"}
@@ -377,7 +399,8 @@ def table(res: dict) -> str:
                     f"({v['answered']} of {v['of']} answered) | at least {bar if bar else 'not fixed yet'} wins: {v['verdict']} |")
     for w, row in res["latency"]["writers"].items():
         if row.get("bits"):
-            rows.append(f"| {w} bit time, median / slowest 5% | {row['p50_s']} s / {row['p95_s']} s ({row['bits']} bits) | "
+            rows.append(f"| {w} bit time, median / slowest 5% | {row['p50_s']} s / {row['p95_s']} s ({row['bits']} bits, "
+                        f"{row['threads_lost_to_time']} threads lost to time) | "
                         f"{'within' if row['within_budget'] else 'over'} the {res['latency']['budget_s']:.0f} s budget |")
     for which, comps in res["judges"].items():
         for comp, v in comps.items():

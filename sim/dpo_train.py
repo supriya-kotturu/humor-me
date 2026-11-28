@@ -12,7 +12,7 @@ and Exp 36 and 37 found neither Haiku nor Opus agrees with the user better than 
 a cache breakpoint (the 18,000-token teach prefix is read 4,800 times), the cache of answers is its own folder under
 `data/dpo/labels/` (so the training split is frozen once labelling starts, `rebuild_train`'s guard), and a rerun asks only what
 the cache lacks. The Message Batches API (half price) is not used: the repo's Claude client has no batch call, and adding one
-unrun was not worth the risk; the labelling costs about a dollar with caching (D-123).
+unrun was not worth the risk; the labelling costs about $1.3 with caching (D-123).
 
 Export. `data/dpo/train/` (gitignored): `sft_B.jsonl`, `dpo_B.jsonl`, `dpo_C.jsonl`, `eval_prompts.jsonl`, `manifest.json`. A
 row is `{"id", "prompt": [system, user messages], ...}` and the reply texts are the raw replies the writer returned, so training
@@ -110,7 +110,7 @@ def add_usage(path: pathlib.Path, now: dict) -> dict:
 
 
 def estimate(todo: int, system: str) -> str:
-    prefix = len(system) // 4  # characters / 4: an approximation that may undercount by about 20% (D-122)
+    prefix = len(system) // 3  # characters / 3: D-122 measured this prefix at 24,074 tokens, a third more than characters / 4
     cached = todo * (prefix * PRICE["cache_read"] + 300 * PRICE["input"] + 12 * PRICE["output"]) / 1e6 + prefix * PRICE["cache_write"] / 1e6
     return f"{todo} calls to make, about ${cached:.2f} with the teach prefix cached (${todo * (prefix + 300) * PRICE['input'] / 1e6:.2f} without)"
 

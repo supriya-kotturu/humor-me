@@ -232,3 +232,26 @@ def test_the_eval_bits_are_written_through_the_pool_writer_into_the_writers_own_
     rec = dp._read(dp.bit_path(tmp_path, "eval", prompts[0]["id"], "humor-qwen3-B"))
     assert (tmp_path / "bits" / "eval-humor-qwen3-B").is_dir() and rec["writer"] == "humor-qwen3-B" and rec["split"] == "eval"
     assert de.bit_of(tmp_path, "humor-qwen3-B", prompts[0]["id"]) is not None and de.bit_of(tmp_path, de.WRITERS["A"], prompts[0]["id"]) is None
+
+
+def test_a_writer_that_loses_threads_to_the_clock_fails_the_latency_bar_even_inside_the_budget(tmp_path, prompts):
+    fill(tmp_path, prompts)
+    for i, p in enumerate(prompts[:10]):  # 10 of 180 threads cut at the budget: 5.6%, over the 5% allowed
+        rec = eval_bit(p, de.WRITERS["B"], threads=2)
+        rec["lost"] = ["GenerationError: a call outlived the bit's budget"]
+        dp._write(dp.bit_path(tmp_path, "eval", p["id"], de.WRITERS["B"]), rec)
+    b = de.latency(prompts, tmp_path)["writers"]["B"]
+    assert b["p95_s"] <= 12.0 and b["threads_lost_to_time"] == 10 and not b["within_budget"]
+
+
+def test_the_first_vote_fixes_the_plan_and_a_later_bit_change_stops_the_vote(root, prompts):
+    de.set_bar(root, 10)
+    de.vote(de.plan(prompts, root), root, read=scripted("1", "q"), out=lambda *_: None)
+    assert len(de.read_votes(root)["plan"]) == 30
+    items = de.plan(prompts, root)
+    first = items[0]
+    rec = dp._read(dp.bit_path(root, "eval", first["pid"], de.WRITERS["A"]))
+    rec["threads"][0]["lines"] = [x + " changed" for x in rec["threads"][0]["lines"]]
+    dp._write(dp.bit_path(root, "eval", first["pid"], de.WRITERS["A"]), rec)
+    with pytest.raises(SystemExit, match="changed after voting began"):
+        de.vote(de.plan(prompts, root), root, read=scripted("1"), out=lambda *_: None)

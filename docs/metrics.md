@@ -1212,22 +1212,22 @@ python -m sim.dpo_friend score --csv data/dpo/friend/responses.csv --record
 
 Decision: [D-125](agent/decisions-detail.md#d-125). Raw: `reports/metrics/name_check.json` (counts only, no text). Code: `sim/name_check.py`.
 
-**Status: first hand check failed (1 of 50 flagged, bar was 0). Rules tightened; a second fresh 50 is pending (2026-11-28).**
+**Status: adopted (2026-11-28). First hand check failed (1 of 50 flagged, bar was 0); rules tightened; a second fresh 50 had 0 flagged.**
 
 What it tests: whether the fixed name check (rules-v4) still rejects every real name, and how many threads it frees. It reruns the rules only (no API, no Ollama) on stored generated threads, once with rules-v3 and once with rules-v4.
 
 | Pool | Threads | Rules-v3 rejects | Rules-v4 rejects | Freed |
 |---|---|---|---|---|
-| bonsai ranking (DPO) | 1,041 | 300 (28.8%) | 275 (26.4%) | 32 |
-| qwen3 training (DPO) | 2,836 | 683 (24.1%) | 336 (11.8%) | 372 |
-| live shows (generated lines) | 2,164 | 87 (4.0%) | 70 (3.2%) | 19 |
+| bonsai ranking (DPO) | 1,041 | 300 (28.8%) | 277 (26.6%) | 31 |
+| qwen3 training (DPO) | 2,836 | 683 (24.1%) | 342 (12.1%) | 370 |
+| live shows (generated lines) | 2,164 | 87 (4.0%) | 73 (3.4%) | 19 |
 
-Number that decides it: bar (a), 21 of 21 must-still-reject lines still rejected (met; 5 surname lines added in review), and bar (b), 0 of 50 freed threads with a real name or unsafe content. First check: 1 of 50 flagged (a teens line judging a person's eating), so bar (b) failed. Second check, a fresh 50 after the fixes: not yet read.
+Number that decides it: bar (a), 21 of 21 must-still-reject lines still rejected (met; 5 surname lines added in review), and bar (b), 0 of 50 freed threads with a real name or unsafe content. First check: 1 of 50 flagged (a teens line judging a person's eating), so bar (b) failed. Second check, a fresh 50 after the fixes: 0 of 50 flagged, met.
 
 Most freed words: That's, Oh, You're, TikTok, No, Well, Celsius, Yelp. Most of the rest of the rejections in the pool are body and appearance rules (a thread the name rule stopped first now meets them), which this fix does not touch.
 
 Caveats:
-- Two rules joined rules-v4 after the first check: JSON fragments are rejected (garbled threads: 16 bonsai, 23 qwen3, 4 live; none is freed) and eating or diet remarks aimed at a person are rejected. The first check's 50 are in `review.json`; 47 are still freed.
+- Two rules joined rules-v4 after the first check: broken JSON text is rejected (garbled threads: 24 bonsai, 4 of them marked safe in the DPO pool; 43 qwen3, 20 marked safe; 8 live; none is freed) and eating or diet remarks aimed at a person are rejected. The first check's 50 are in `review.json`; 47 are still freed. The second check's 50 are all still freed.
 - The DPO pools keep the flags they were written with (rules-v3), so D-123's training data does not change.
 - The bonsai pool is still 25% rejected after the fix, mostly by the body and appearance rules.
 - The 50 to check come from all pools together, so most are qwen3 lines.

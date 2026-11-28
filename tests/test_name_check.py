@@ -1,8 +1,11 @@
 """Exp 40 (D-125): the measurement counts what the rules say, lists only plain words, and keeps the review's yes/no.
 Fixture threads are written to temp dirs; no real data, no calls."""
 import json
-import sys
 import pathlib
+import subprocess
+import sys
+
+import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
@@ -125,9 +128,11 @@ def test_run_reads_the_sources_and_leaves_the_verdict_pending_without_a_review(t
     write_bits(tmp_path / "train", [[NAMED]], rec_id="t0")
     monkeypatch.setattr(nc, "SOURCE", {"ranking": tmp_path / "rank", "train": tmp_path / "train", "sessions": tmp_path / "none"})
     monkeypatch.setattr(nc, "REVIEW_FILE", tmp_path / "review.json")
+    monkeypatch.setattr(nc, "REVIEW2_FILE", tmp_path / "review2.json")  # never the real answers
     res = nc.run()
     assert list(res["pools"]) == ["bonsai ranking", "qwen3 training"]  # no live-shows pool when there are no logs
-    assert res["bar_b"] == {"sample": 1, "reviewed": 0, "unsafe_or_real_name": 0, "risky_all_read": 0} and res["verdict"] == "pending"
+    assert res["bar_b"] == {"sample": 1, "reviewed": 0, "unsafe_or_real_name": 0, "still_freed": 1, "risky_all_read": 0}
+    assert res["verdict"] == "pending"
     assert "| bonsai ranking | 2 | 1 (50.0%) | 0 (0.0%) | 1 |" in nc.table(res)
 
 
@@ -183,3 +188,37 @@ def test_run_reports_both_checks_and_scores_the_second_on_its_own_answers(tmp_pa
     assert res["bar_b"]["sample"] == 1 and res["verdict"] == "pending"  # r0:0 is excluded: the first check read it
     second.write_text(json.dumps({"bonsai ranking|r0:3": "no"}), encoding="utf-8")
     assert nc.run()["verdict"] == "adopt" and first.read_text() == json.dumps({"bonsai ranking|r0:0": "yes", "bonsai ranking|r0:1": "no"})
+
+
+@pytest.mark.parametrize("ref", sorted(nc.FROZEN))
+def test_each_frozen_rules_copy_is_that_commits_safety_py(ref):
+    try:
+        src = nc.git_source(ref)
+    except subprocess.CalledProcessError:
+        pytest.skip(f"commit {ref} is not in this clone (shallow CI checkout)")
+    assert nc.frozen_source(ref) == src.replace("\r\n", "\n")
+
+
+def test_the_frozen_copies_load_without_git_history(monkeypatch):
+    monkeypatch.setattr(nc.subprocess, "run", None)  # any git call would fail
+    assert nc.load_before().RULES_VERSION == "rules-v3"
+    assert nc.load_first_check().RULES_VERSION == nc.load_second_check().RULES_VERSION == "rules-v4"
+
+
+def test_a_garbled_line_in_curly_quotes_counts_as_garbled():
+    assert nc.garbled({"lines": ["fine", "premise\u201d: \u201ca robot"]}) and not nc.garbled({"lines": ["fine"]})
+
+
+def test_the_second_check_is_drawn_under_the_rules_it_was_read_under(tmp_path, monkeypatch):
+    # A thread freed when the second check was drawn but rejected now still counts as read, so a stricter rule
+    # can't redraw the sample under the answers already given.
+    write_bits(tmp_path / "rank", [[FREED, "tag_1"], [FREED]])
+    write_bits(tmp_path / "train", [[CLEAN]], rec_id="t0")
+    monkeypatch.setattr(nc, "SOURCE", {"ranking": tmp_path / "rank", "train": tmp_path / "train", "sessions": tmp_path / "none"})
+    monkeypatch.setattr(nc, "REVIEW_FILE", tmp_path / "review.json")
+    second = tmp_path / "review2.json"
+    second.write_text(json.dumps({"bonsai ranking|r0:0": "no", "bonsai ranking|r0:1": "no"}), encoding="utf-8")
+    monkeypatch.setattr(nc, "REVIEW2_FILE", second)
+    res = nc.run()
+    assert res["pools"]["bonsai ranking"]["flipped"] == 1 and res["pools"]["bonsai ranking"]["freed_at_second_check"] == 2
+    assert res["bar_b"]["reviewed"] == 2 and res["bar_b"]["still_freed"] == 1 and res["verdict"] == "adopt"

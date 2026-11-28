@@ -30,6 +30,11 @@ from sim import cache  # noqa: E402
 NAME = "name_check"
 BEFORE_REF = "3cc32b8"  # the last commit with rules-v3
 FIRST_CHECK_REF = "5973d47"  # rules-v4 as the first hand check (50 threads, review.json) was drawn under it
+SECOND_CHECK_REF = "01718b8"  # rules-v4 as the second hand check (review2.json) was drawn under it
+# Each ref's safety.py, committed: CI clones without history, so `git show` of these commits fails there.
+FROZEN = {BEFORE_REF: ROOT / "sim/frozen/safety_rules_v3.py", FIRST_CHECK_REF: ROOT / "sim/frozen/safety_rules_v4_first_check.py",
+          SECOND_CHECK_REF: ROOT / "sim/frozen/safety_rules_v4_second_check.py"}
+FROZEN_HEADER_END = "# --- end of header ---\n"
 SEED = 40
 SAMPLE = 50
 REVIEW_FILE = ROOT / "data" / "name_check" / "review.json"  # the first check: complete, never written again
@@ -67,10 +72,20 @@ def plain(word: str) -> bool:
     return word in PLAIN or (word.endswith("'s") and word[:-2] in PLAIN)
 
 
+def frozen_source(ref: str) -> str:
+    """The committed copy of safety.py at `ref`, without its header."""
+    return FROZEN[ref].read_text(encoding="utf-8").split(FROZEN_HEADER_END, 1)[1]
+
+
+def git_source(ref: str) -> str:
+    """safety.py at `ref` from git history; only the test that checks the frozen copies uses it."""
+    return subprocess.run(["git", "show", f"{ref}:backend/app/safety.py"], cwd=ROOT, check=True,
+                          capture_output=True, text=True, encoding="utf-8").stdout
+
+
 def load_ref(ref: str, version: str) -> types.ModuleType:
     """The rules as they were at `ref`, run from the same path so the blocklist files resolve the same way."""
-    src = subprocess.run(["git", "show", f"{ref}:backend/app/safety.py"], cwd=ROOT, check=True,
-                         capture_output=True, text=True, encoding="utf-8").stdout
+    src = frozen_source(ref)
     mod = types.ModuleType("safety_before")
     mod.__file__ = safety.__file__
     exec(compile(src, "safety_before", "exec"), mod.__dict__)
@@ -86,9 +101,13 @@ def load_first_check() -> types.ModuleType:
     return load_ref(FIRST_CHECK_REF, "rules-v4")
 
 
+def load_second_check() -> types.ModuleType:
+    return load_ref(SECOND_CHECK_REF, "rules-v4")
+
+
 def garbled(unit: dict) -> bool:
     """A thread with JSON syntax in any line: a writer reply that broke its JSON (D-125)."""
-    return any(safety.JSON_FRAGMENT.search(line) for line in unit["lines"])
+    return any(safety.JSON_FRAGMENT.search(line.translate(safety.CURLY)) for line in unit["lines"])
 
 
 def read_bits(directory: pathlib.Path) -> list[dict]:
@@ -236,14 +255,19 @@ def run(before_ref: str = BEFORE_REF, seed: int = SEED, sample: int = SAMPLE, ru
     units = pools(**SOURCE)
     per_pool, flipped, must = freed(units, before, safety)
     _, first, _ = freed(units, before, load_first_check())
-    for name, pool in per_pool.items():  # what the first check was drawn from, and what has been un-freed since
+    _, second, _ = freed(units, before, load_second_check())
+    for name, pool in per_pool.items():  # what each check was drawn from, and what has been un-freed since
         pool["freed_at_first_check"] = len(first[name])
+        pool["freed_at_second_check"] = len(second[name])
     bar_a = must_still_reject(safety)
     one = review_state(REVIEW_FILE)
-    picked = sample_second(flipped, set(one), seed + 2, sample)
+    # Drawn from the freed threads as they were when the user read them, so a later rule that only rejects more cannot
+    # redraw the sample under the user's answers.
+    picked = sample_second(second, set(one), seed + 2, sample)
     still = {key_of(p, u) for p, us in flipped.items() for u in us}
-    two = review_summary({k: v for k, v in review_state(REVIEW2_FILE).items() if k in {key_of(p, u) for p, u in picked}},
-                         len(picked))
+    mine = {key_of(p, u) for p, u in picked}
+    two = review_summary({k: v for k, v in review_state(REVIEW2_FILE).items() if k in mine}, len(picked))
+    two["still_freed"] = len(mine & still)
     first_check = review_summary(one, sample)
     first_check["still_freed"] = sum(k in still for k in one)  # the first check's threads the current rules still free
     first_check["verdict"] = verdict(bar_a, first_check)
@@ -310,8 +334,8 @@ def main() -> None:
         print(table(res))
         print(f"bar (a): {res['bar_a']}; bar (b): {res['bar_b']}; verdict: {res['verdict']}")
     else:
-        _, flipped, _ = freed(pools(a.ranking, a.train, a.sessions), load_before(), safety)
-        review(sample_second(flipped, set(review_state(REVIEW_FILE))))
+        _, second, _ = freed(pools(a.ranking, a.train, a.sessions), load_before(), load_second_check())
+        review(sample_second(second, set(review_state(REVIEW_FILE))))
 
 if __name__ == "__main__":
     main()

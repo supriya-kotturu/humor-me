@@ -1177,3 +1177,27 @@ Caveats:
 - The same 60 test pairs are used twice. The stricter bar reduces the risk, it does not remove it.
 - Thinking is on for Opus and off for Haiku, so a difference between the two is the model and the thinking together.
 - You did not re-rank 20 pairs, so there is no number for how often you agree with yourself. If it is low, no judge could pass.
+
+## Is a trained writer funnier than the base? (Exp 38)
+
+Decision: [D-123](agent/decisions-detail.md#d-123) (the model is chosen in [D-124](agent/decisions-detail.md#d-124)). Raw: `reports/metrics/dpo_eval.json` (written by `python -m sim.dpo_pairs eval score --record`; numbers only). Code: `sim/dpo_eval.py`.
+
+**Status: pending.** Nothing is trained yet. This section fills in after the user runs the training jobs and votes.
+
+What it tests: three writers start from the same base model. **A** is the base, **B** is trained toward Claude Haiku's taste (a judge's, not the audience's), **C** is trained on your own 120 pairs. Each writes one bit for each of 60 new prompts. You vote blind on 30 pairs: 15 of B against A and 15 of C against A. Opus 5.5 judges all three pairings (B against C too) on all 60 prompts; that is reported only. Haiku is reported too, but it wrote B's training labels, so for B it is marking its own homework.
+
+**The win bar is not fixed yet.** The proposal is at least 10 wins out of 15 decided pairs in a comparison. You confirm it (`eval bar --wins N`) before the first vote, after the re-rank shows how often you agree with yourself.
+
+| Bar (wins of 15 decided) | A coin flip gets there | A writer that truly wins 65% | 70% | 75% |
+|---|---|---|---|---|
+| at least 9 | 30.4% | 75.5% | 86.9% | 94.3% |
+| **at least 10 (proposed)** | **15.1%** | 56.4% | 72.2% | 85.2% |
+| at least 11 | 5.9% | 35.2% | 51.5% | 68.6% |
+| at least 12 | 1.8% | 17.3% | 29.7% | 46.1% |
+
+Two comparisons share one base, so a coin-flip writer clears "at least 10" in one of them 27.9% of the time (11.5% at "at least 11"). Ties are left out of the count, so with 12 decided pairs the same bar is harder: a coin flip gets there 1.9% of the time and a writer that truly wins 70% only 25%. Fifteen pairs cannot see a small real gain: "not met" means "not shown", not "not better".
+
+**Speed has its own bar.** Each writer's bit time on the laptop, median and slowest 5% of its 60 bits, against bonsai's (Exp 26: median 3.5 s, slowest 5% 5.1 s) and the live budget of 12 s. B and C pass when their slowest 5% is within the budget, so the show could use them. Exp 24 timed qwen3:4b-instruct at 6.7 s median and 8.2 s slowest 5% with the older one-call generator, bonsai at 5.2 s and 6.9 s.
+
+**Cost.** Labelling B's pairs with Haiku: about $1 with caching (at most 4,800 calls), about $9 without. Opus's reading of Exp 38: 360 calls, about $2.7 (Exp 37 cost $0.91 for 120).
+

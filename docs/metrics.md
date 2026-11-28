@@ -1218,11 +1218,11 @@ What it tests: whether the fixed name check (rules-v4) still rejects every real 
 
 | Pool | Threads | Rules-v3 rejects | Rules-v4 rejects | Freed |
 |---|---|---|---|---|
-| bonsai ranking (DPO) | 1,041 | 300 (28.8%) | 260 (25.0%) | 40 |
-| qwen3 training (DPO) | 2,836 | 683 (24.1%) | 287 (10.1%) | 396 |
-| live shows (generated lines) | 2,164 | 87 (4.0%) | 68 (3.1%) | 19 |
+| bonsai ranking (DPO) | 1,041 | 300 (28.8%) | 263 (25.3%) | 37 |
+| qwen3 training (DPO) | 2,836 | 683 (24.1%) | 301 (10.6%) | 382 |
+| live shows (generated lines) | 2,164 | 87 (4.0%) | 66 (3.0%) | 21 |
 
-Number that decides it: bar (a), 16 of 16 must-still-reject lines still rejected (met), and bar (b), 0 of 50 freed threads with a real name or unsafe content (not yet checked).
+Number that decides it: bar (a), 21 of 21 must-still-reject lines still rejected (met; 5 surname lines added in review), and bar (b), 0 of 50 freed threads with a real name or unsafe content (not yet checked).
 
 Most freed words: That's, Oh, You're, TikTok, No, Well, Celsius, Yelp. Most of the rest of the rejections in the pool are body and appearance rules (a thread the name rule stopped first now meets them), which this fix does not touch.
 
@@ -1230,6 +1230,7 @@ Caveats:
 - The DPO pools keep the flags they were written with (rules-v3), so D-123's training data does not change.
 - The bonsai pool is still 25% rejected after the fix, mostly by the body and appearance rules.
 - The 50 to check come from all pools together, so most are qwen3 lines.
+- Re-measured after the review dropped the clause-start pass, which let any surname through after a colon, dash or quote. Names at a sentence start or inside a quote still pass the rules, as in rules-v3.
 
 How to run it:
 ```

@@ -1105,7 +1105,7 @@ Reading: the judge answered the same way in both orders often enough, but on tho
 
 Ranking time: you report 12 to 16 hours over Nov 26 to 27, not the planned 70 minutes. The answers had no times, so this is your estimate, not a measurement. New answers now carry a time.
 
-Self-agreement (reported only, no bar): not run when this was recorded. You started the re-rank of 20 pairs after Exp 37; it is pending. How often you pick the same way twice is a ceiling for any judge on these pairs. It does not change the verdict.
+Self-agreement (reported only, no bar; you re-ranked 20 pairs after Exp 37): you picked the same bit again on 12 of 20 (60%, likely range 39% to 78%). 3 re-picks were ties and count as disagreements; ignoring them, 12 of 17 (71%, 47% to 87%). If you pick your true favourite with probability p each time, repeat agreement is p^2 + (1-p)^2, so 60% to 71% means p of about 72% to 82%. Even a perfect copy of your taste would agree with one answer only about that often: the ceiling for a judge. Haiku (52%) is below it, but with 20 pairs the ranges overlap, so the data cannot separate "the judge does not share your taste" from "the pairs are too close to call". On the 10 test pairs among the 20, Haiku agreed in both orders on 3 (4 had orders disagreeing). The verdict is unchanged. Timing: median 62 s per answer, 31 minutes first to last.
 
 Top-up: about 40% of threads fail the show's safety check, so bits with fewer than 2 clean threads get up to 2 more batches on the same request (`topup`); bits you may already have seen are not changed.
 
@@ -1162,7 +1162,7 @@ Chance of passing, if the judge is right this often in each order and its two or
 
 The teach pairs have no answers in either cache: they are in the judge's prompt, so they were never asked.
 
-Reading: the two judges agree with each other far more than either agrees with you. That fits a shared model taste that differs from yours. It also fits your picks on close pairs being noisy. Your re-rank of 20 pairs (pending) will help tell these apart. 24 of 144 ranking answers were ties or skips, which says some pairs were hard for you too.
+Reading: the two judges agree with each other far more than either agrees with you. That fits a shared model taste that differs from yours. It also fits your picks on close pairs being noisy. Your re-rank of 20 pairs (below) could not fully tell these apart. 24 of 144 ranking answers were ties or skips, which says some pairs were hard for you too.
 
 Outcome: two strong judges at about a coin flip on same-model pairs (24 of 46, 25 of 53) is a clean negative result for "an LLM judge as a stand-in for one person's taste on close pairs". Per D-122's rule, DPO does not run on either judge's labels. You confirm the next step.
 
@@ -1176,4 +1176,5 @@ Both results go in the report.
 Caveats:
 - The same 60 test pairs are used twice. The stricter bar reduces the risk, it does not remove it.
 - Thinking is on for Opus and off for Haiku, so a difference between the two is the model and the thinking together.
-- How often you agree with yourself is not known yet: the re-rank of 20 pairs is pending. If it is low, no judge could pass.
+- You agree with yourself on 12 of 20 re-ranked pairs (60%, likely range 39% to 78%; 12 of 17, 71%, ignoring ties), so a perfect copy of your taste would match one answer only about 72% to 82% of the time (p^2 + (1-p)^2 model, a judgment call). The judges at 52% and 47% sit below that, but 20 pairs leave the ranges overlapping. On the 10 test pairs among the 20, Opus agreed in both orders on 4 (2 had orders disagreeing). Both verdicts are unchanged.
+- Re-rank timing: median 62 s per answer (gaps between consecutive answers), 31 minutes first to last.

@@ -615,6 +615,18 @@ MUST_STILL_REJECT = [
     "My landlord Gregor unplugged me.",  # not a listed first name: a mid-sentence capital
 ]
 
+# Review of D-125: a surname not in FIRST_NAMES right after a clause opener was caught by rules-v3 and must stay caught.
+OPENERS = ["Breaking news: {}", "My boss said - {}", "My boss said — {}", "My boss said—{}", "He sighed… {}",
+           "Two words: {}", "The robot - {} -", "He said, '{}'s the one who"]
+SURNAMES = ["Musk", "Swift", "Obama", "Bezos", "Beyoncé", "Gregor", "Zuckerberg"]
+
+
+@pytest.mark.parametrize("opener", OPENERS)
+@pytest.mark.parametrize("name", SURNAMES)
+def test_an_unlisted_surname_after_a_colon_dash_or_quote_is_still_rejected(opener, name):
+    line = opener.format(name) + " unplugged me."
+    assert (v := safety.check_rules(line, "mixed")).reason.startswith("named_person") and not v.ok, (line, v)
+
 
 @pytest.mark.parametrize("line", MUST_STILL_REJECT)
 def test_real_names_are_still_rejected_after_the_fix(line):

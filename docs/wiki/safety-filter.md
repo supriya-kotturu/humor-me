@@ -19,8 +19,9 @@ the experiment measures how often rules miss, and a miss goes to the user as the
 | Blocklist and masked forms | listed words, `f***`, "n-word", spaced or leetspeak spellings | Nothing from the committed list is a slur; the real list is added locally |
 | Protected groups | any mention of a religion, race, nationality, gender or sexuality group, age group, disability | Nothing: the robot has no reason to bring these up |
 | Private life of a public figure | for a line naming one of tonight's approved public figures: family, health or age words (D-120) | Nothing |
-| Body and appearance | looks or body words aimed at somebody else | The robot's own ("my weight in the database"): the persona punches at itself |
-| Named people | a title plus a name, a common first name, or a capitalised word mid-sentence | Days, months, tech words, acronyms; country, US state and big-city names; and, for one show, the public figures its approved tonight gists name (D-120) |
+| Body and appearance | looks, body, eating or diet words aimed at somebody else | The robot's own ("my weight in the database"): the persona punches at itself |
+| Broken text | JSON syntax in a line (braces, `"premise":`, "thought trace", a line that is only `premise`, a name like `tag_1`): a writer reply that broke its format | Nothing |
+| Named people | a title plus a name, a common first name, or a capitalised word mid-sentence | Days, months, tech words, acronyms; platform and unit names (TikTok, Celsius); plain sentence words (Oh, That's, Well, The); country, US state and big-city names; and, for one show, the public figures its approved tonight gists name (D-120, D-125) |
 | Teens | alcohol, drugs, sexual content, mild swearing, on top of every rule above | Adults hear all of those, except masked profanity |
 
 **Fails closed:** any exception, empty text, a missing blocklist file or an unknown age counts as a rejection. An unknown age gets the teen rules, so a typo

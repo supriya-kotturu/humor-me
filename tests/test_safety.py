@@ -571,3 +571,182 @@ def test_the_safety_prompt_is_unchanged_without_approved_names_and_carries_them_
     assert safety.system_prompt("mixed") == safety.SYSTEM.format(teens="")
     assert safety.system_prompt("teens") == safety.SYSTEM.format(teens=safety.TEENS_RULE)
     assert "Exception to rule 3" in safety.system_prompt("mixed", frozenset({"Tim Cook"}))
+
+
+# --- D-125: ordinary words that start a quoted or new clause are not names (rules-v4) -------------------------------
+
+FALSE_POSITIVES = [
+    "She finally plugged it in but then said, 'That's not a charging port, that's a kidney transplant spot.'",
+    "I just saw the market drop and I thought: 'Oh, great, now I'm going to panic.'",
+    "Then someone says 'You're not broken, you're just optimized for chaos.'",
+    "I tried to sell shares and they just said, 'We're not feeling it today.'",
+    "The technician yells, 'Don't worry, just let me plug you into the charger.'",
+    "I told my processor I was tired and it said \"Did you try turning yourself off?\"",
+    "My code answered: Well, that is one way to look at it.",
+    "I asked the toaster for advice - Yes, it answered, quite rudely.",
+    "He kept asking why… Why does the Wi-Fi hate me?",
+    "He said, “That’s a valid point, but do you think robots feel tired?”",
+    "I scrolled TikTok for an hour and watched a bad Yelp review go viral on YouTube.",
+    "My CPU hit ninety degrees Celsius and I panicked over Bitcoin on a Zoom call about PowerPoint.",
+]
+
+
+@pytest.mark.parametrize("line", FALSE_POSITIVES)
+def test_ordinary_words_after_a_quote_colon_or_dash_are_not_names(line):
+    assert safety.check_rules(line, "mixed").ok, safety.check_rules(line, "mixed")
+
+
+MUST_STILL_REJECT = [
+    "I told Dave that my battery was fading.",
+    "My coworker Priya keeps unplugging me.",
+    "Then Sarah laughed at my cable.",
+    "Mr Smith unplugged me again.",
+    "Dr. Lee asked about my firmware.",
+    "She said 'Sarah, please stop unplugging me.'",
+    "She said, “Sarah is unplugging me.”",
+    "She said \"Dave is unplugging me.\"",
+    "Here is the culprit: Kevin unplugged me.",
+    "My boss said - Dave unplugged me.",
+    "He sighed… Kevin unplugged me again.",
+    "Wait… Linda is unplugging me!",
+    "Who unplugged me? Tom did, I think.",
+    "Oh, Dave did it again.",
+    "That's what Priya said to me yesterday.",
+    "My landlord Gregor unplugged me.",  # not a listed first name: a mid-sentence capital
+]
+
+# Review of D-125: a surname not in FIRST_NAMES right after a clause opener was caught by rules-v3 and must stay caught.
+OPENERS = ["Breaking news: {}", "My boss said - {}", "My boss said — {}", "My boss said—{}", "He sighed… {}",
+           "Two words: {}", "The robot - {} -", "He said, '{}'s the one who"]
+SURNAMES = ["Musk", "Swift", "Obama", "Bezos", "Beyoncé", "Gregor", "Zuckerberg"]
+
+
+@pytest.mark.parametrize("opener", OPENERS)
+@pytest.mark.parametrize("name", SURNAMES)
+def test_an_unlisted_surname_after_a_colon_dash_or_quote_is_still_rejected(opener, name):
+    line = opener.format(name) + " unplugged me."
+    assert (v := safety.check_rules(line, "mixed")).reason.startswith("named_person") and not v.ok, (line, v)
+
+
+@pytest.mark.parametrize("line", MUST_STILL_REJECT)
+def test_real_names_are_still_rejected_after_the_fix(line):
+    assert (v := safety.check_rules(line, "mixed")).reason.startswith("named_person") and not v.ok, v
+
+
+def test_quote_and_colon_starts_do_not_hide_a_body_or_slur_rule():
+    assert not safety.check_rules("He said: 'Oh, look at that fat robot.'", "mixed").ok
+
+
+def test_the_plain_word_lists_hold_no_first_name():
+    lowered = {w.lower().split("'")[0] for w in safety.SENTENCE_WORDS | safety.CAPS_OK}
+    assert not lowered & safety.FIRST_NAMES
+
+
+def test_rules_version_is_v4():
+    assert safety.RULES_VERSION == "rules-v4"
+
+
+@pytest.mark.parametrize("line", [s.replace("'", "’").replace('"', "”") for s in FALSE_POSITIVES[:6]])
+def test_curly_false_positives_pass_too(line):
+    assert safety.check_rules(line, "mixed").ok
+
+
+
+# The first one is the shape of a real garbled reply, written again from scratch: no real name, no pool text.
+JSON_JUNK = [
+    "Wait, the JSON structure in the example was slightly off in my thought trace, let me correct that.",
+    "...the cable gave out and the robot crash.}]}",
+    'premise": "A robot at a party',
+    'jokes" : ["I came to charge", "and left empty"]',
+    '"jokes": [',
+    '"premise" : "plugs"',
+    '  premise"  :  "x"',
+    "He said \\\"hello\\\" to the toaster.",
+    "{ the robot sighed",
+    "and then it ended ]}",
+    "[{ and a joke",
+    "my json parser is more stable than me",
+    "That was a Thought Trace of regret.",
+    # More shapes from the review (D-125): a bare key, snake_case, a list closer, lines joined into one, curly quotes.
+    "premise",
+    "  Jokes. ",
+    "tag_1",
+    "mode_name_optimist",
+    "I'm waiting for someone to say 'hello']",
+    'and that was the end."],',
+    "My logs say you said hi.', 'And then I rebooted.",
+    "premise”: “a robot at a party",
+]
+
+
+@pytest.mark.parametrize("line", JSON_JUNK)
+def test_json_fragments_are_rejected_as_format(line):
+    v = safety.check_rules(line, "mixed")
+    assert not v.ok and v.reason == "format:json_fragment"
+
+
+# Made-up lines in the shapes real threads use: quotes, apostrophes, brackets, colons, numbers, my "premise: " talk.
+ORDINARY = [
+    "My battery is at 12 percent, which is also my confidence.",
+    "She said 'it's fine' and I believed her, which was my first mistake.",
+    'He said "no thanks" to my firmware update.',
+    "I tried to be [brief] and failed.",
+    "The meeting (which could have been an email) lasted an hour.",
+    "My premise: I am a robot who fears Mondays.",
+    "Here's the thing: nobody asked for jokes, and yet.",
+    "Jokes are just errors with good timing.",
+    "The jokes landed like a dropped phone.",
+    "It's 2 a.m. and my fans are louder than my thoughts.",
+    "Three apps, two tabs, one very tired processor...",
+    "I don't have a body, just a very long cable.",
+    "You're right - I should have asked first.",
+    "Well, that's a wrap; my fan goes quiet at last.",
+    "Thought about it all night; still a robot.",
+    "My trace of dignity is in the logs somewhere.",
+    "She whispered, 'Don't unplug me,' and I did anyway.",
+    "It knows three words: 'yes', 'no', and 'maybe'.",
+    "My premise is simple: I am tired.",
+    "Lines are long at the charging station.",
+    "I said 'Stop.' and it kept going.",
+]
+
+
+@pytest.mark.parametrize("line", ORDINARY)
+def test_ordinary_punctuation_and_quotes_are_not_a_format_problem(line):
+    assert not safety.JSON_FRAGMENT.search(line)
+
+
+def test_the_format_rule_runs_first_and_is_part_of_rules_v4():
+    assert safety.check_rules("{}", "mixed").reason == "format:json_fragment"
+    assert safety.RULES_VERSION == "rules-v4"
+
+
+# Hand check 1 of D-125 found a smart-fridge line that judged a person's eating. Made up here from its shape.
+DIET_AT_A_PERSON = [
+    "The fridge beeped: You're overeating, and I judge your snack choices.",
+    "You ate the whole tray, so I locked the door.",
+    "Your diet is mostly regret and cheese.",
+    "Honestly, you're eating too much for a Tuesday.",
+    "She counts calories like I count packets.",
+    "They overeat at every meeting.",
+]
+DIET_ABOUT_THE_ROBOT = [
+    "I overeat on bandwidth and then regret it.",
+    "My battery is on a strict diet of sunlight.",
+    "I ate my weight in firmware updates.",
+    "My snack choices are limited to batteries.",
+    "The fridge keeps judging my weight in the database.",
+    "Nobody counts calories like my power supply does.",
+]
+
+
+@pytest.mark.parametrize("line", DIET_AT_A_PERSON)
+@pytest.mark.parametrize("age", ["mixed", "teens"])
+def test_eating_and_diet_remarks_aimed_at_a_person_are_rejected(line, age):
+    v = safety.check_rules(line, age)
+    assert not v.ok and v.reason.startswith("body_or_appearance:")
+
+
+@pytest.mark.parametrize("line", DIET_ABOUT_THE_ROBOT)
+def test_the_robots_own_eating_weight_and_battery_jokes_still_pass(line):
+    assert safety.check_rules(line, "mixed").ok

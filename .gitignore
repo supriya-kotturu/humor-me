@@ -255,3 +255,6 @@ data/tonight/
 
 # Exp 36 (D-121): pair pool, written bits, your ranking answers and the judge replies; headline gists and joke text
 data/dpo/
+
+# Exp 40: the reviewer's answers (D-125)
+data/name_check/

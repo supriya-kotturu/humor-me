@@ -1178,3 +1178,32 @@ Caveats:
 - Thinking is on for Opus and off for Haiku, so a difference between the two is the model and the thinking together.
 - You agree with yourself on 12 of 20 re-ranked pairs (60%, likely range 39% to 78%; 12 of 17, 71%, ignoring ties), so a perfect copy of your taste would match one answer only about 72% to 82% of the time (p^2 + (1-p)^2 model, a judgment call). The judges at 52% and 47% sit below that, but 20 pairs leave the ranges overlapping. On the 10 test pairs among the 20, Opus agreed in both orders on 4 (2 had orders disagreeing). Both verdicts are unchanged.
 - Re-rank timing: median 62 s per answer (gaps between consecutive answers), 31 minutes first to last. These were pairs you had already read once, so this does not estimate first-time ranking, which you report took far longer.
+
+## Do other people pick like you, or like the judges? (Exp 39)
+
+Decision: [D-122](agent/decisions-detail.md#d-122), evidence only. Raw: `reports/metrics/dpo_friend.json` (numbers only). Code: `sim/dpo_friend.py`.
+
+**Status: done (2026-11-27). Reported only, no bar, no decision.**
+
+What it tests: whether anyone else picks the bit you picked. One friend rated 30 of your ranked pairs (16 teach, 14 test) blind in a form. Judges are compared on test pairs only, where they answered the same way in both orders. "Can't pick" is left out.
+
+| Comparison | Agree | Likely range (95%) |
+|---|---|---|
+| Friend vs you | 10 of 23 (43%) | 26% to 63% |
+| Friend vs you, test pairs only | 5 of 13 | 18% to 64% |
+| Haiku 5.5 judge vs friend | 6 of 10 | 31% to 83% |
+| Opus 5.5 judge vs friend | 6 of 11 | 28% to 79% |
+| You vs yourself (re-rank, for scale) | 12 of 20 | 39% to 78% |
+
+By cell, friend vs you: teach/plain 2 of 5, teach/tonight 3 of 5, test/plain 2 of 7, test/tonight 3 of 6. The friend could not pick on 7 of 30 pairs.
+
+Reading: everyone is near a coin flip with everyone, except the two judges with each other (32 of 41, 78%). Same-writer pairs look too close for people to agree on, and the two models seem to share a taste of their own. One rater and 13 to 23 pairs cannot prove either: every range includes 50%.
+
+Caveats:
+- One rater. A second would add rater-against-rater and majority-against-you numbers (already coded).
+- Teach pairs cannot be used for the judges, so the judge rows rest on 10 and 11 pairs.
+
+How to run it:
+```
+python -m sim.dpo_friend score --csv data/dpo/friend/responses.csv --record
+```

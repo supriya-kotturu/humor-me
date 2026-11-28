@@ -1200,6 +1200,8 @@ Two comparisons share one base, so a coin-flip writer clears "at least 10" in on
 
 **Speed has its own bar.** Each writer's bit time on the laptop, median and slowest 5% of its 60 bits, against bonsai's (Exp 26: median 3.5 s, slowest 5% 5.1 s) and the live budget of 12 s. B and C pass when their slowest 5% is within the budget and at most 5% of their threads ran out of time (a slow call is dropped at the budget, so bit time alone would hide it). Exp 24 timed qwen3:4b-instruct at 6.7 s median and 8.2 s slowest 5% with the older one-call generator, bonsai at 5.2 s and 6.9 s.
 
+**Training pool.** B is trained on the pool after `reflag` (rules-v4, D-125), so threads the old name check wrongly rejected are in; the manifest says how many pairs came from them (D-123).
+
 **Cost.** Labelling B's pairs with Haiku: about $1.3 with caching (at most 4,800 calls), about $12 without (the teach prompt is about 24,100 tokens, measured in Exp 37). Opus's reading of Exp 38: 360 calls, about $2.7 (Exp 37 cost $0.91 for 120).
 
 ## Do other people pick like you, or like the judges? (Exp 39)

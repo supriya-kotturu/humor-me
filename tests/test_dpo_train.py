@@ -436,3 +436,157 @@ def test_the_capturing_wrapper_sends_what_the_show_sends_and_stores_each_reply_v
     raws = [t["raw"] for t in rec["threads"]]
     assert len(set(raws)) == len(raws) == generate.K and all(generate.parse(r) == (t["premise"], t["lines"]) for r, t in zip(raws, rec["threads"]))
     assert dt.split_request(rec["request"]) == fake.seen[0]["messages"]
+
+
+# --- re-flag (D-123: the rules fix freed threads the old name check wrongly rejected) ------------------------------------------
+
+class RulesSafety:
+    """Passes everything except thread 4's lines (still bad under the new rules); thread 3's lines hit an outage when `fail`.
+    Records what the LLM layer was asked to judge and every line checked."""
+
+    def __init__(self, fail=False):
+        self.fail, self.prefetched, self.checked, self.allow_caps, self.allow_people = fail, [], [], frozenset(), frozenset()
+
+    def prefetch(self, texts, age):
+        self.prefetched += texts
+
+    def check(self, text, age):
+        self.checked.append(text)
+        if " t4 " in text:
+            return dp.safety.Verdict(False, "rule:still bad")
+        if self.fail and " t3 " in text:
+            return dp.safety.Verdict(False, "llm:error TimeoutError")
+        return dp.safety.Verdict(True, "ok")
+
+
+@pytest.fixture
+def stale(pool, tmp_path, monkeypatch):
+    """Bits written under rules-v3, five threads each. Bit 0: 0,1,2 clean, 3 and 4 rejected. Bit 1: 0 rejected, 1,2,3 clean, 4
+    rejected. Bit 2: only 0 clean, the rest rejected. Rules are v4 afterwards."""
+    for p, bad in zip(train_prompts(pool, 3), [(3, 4), (0, 4), (1, 2, 3, 4)]):
+        rec = bit_record(p, n_threads=5, unsafe=bad)
+        for i in bad:
+            rec["threads"][i]["rejected"] = ["rule:name"]
+        rec["safety_rules"] = "rules-v3"
+        dp._write(dp.bit_path(tmp_path, "train", p["id"], QWEN), rec)
+    monkeypatch.setattr(dp.safety, "RULES_VERSION", "rules-v4")
+    return tmp_path
+
+
+def bit_files(root, pool):
+    return [dp._read(dp.bit_path(root, "train", p["id"], QWEN)) for p in train_prompts(pool, 3)]
+
+
+def run_reflag(root, pool, s=None):
+    return dp.reflag("train", s or RulesSafety(), pool, QWEN, root, out=lambda *_: None)
+
+
+def ids(pool):
+    return [p["id"] for p in train_prompts(pool, 3)]
+
+
+def test_reflag_refuses_unless_the_rules_are_newer_than_the_ones_the_bits_were_written_with(pool, stale, monkeypatch):
+    folder = stale / "bits" / "train-qwen3"
+    before = [p.read_bytes() for p in sorted(folder.iterdir())]
+    for same in ("rules-v3", "rules-v2"):
+        monkeypatch.setattr(dp.safety, "RULES_VERSION", same)
+        with pytest.raises(SystemExit, match="not newer"):
+            run_reflag(stale, pool)
+    assert [p.read_bytes() for p in sorted(folder.iterdir())] == before
+    recs = bit_files(stale, pool)
+    recs[0]["topups"] = [{"batch": 1, "rules": "rules-v4"}]  # a top-up under the current rules: the record is not older
+    dp._write(dp.bit_path(stale, "train", recs[0]["id"], QWEN), recs[0])
+    monkeypatch.setattr(dp.safety, "RULES_VERSION", "rules-v4")
+    with pytest.raises(SystemExit, match="not newer"):
+        run_reflag(stale, pool)
+
+
+def test_reflag_rechecks_only_threads_that_are_not_safe_and_never_changes_a_safe_one(pool, stale):
+    before = bit_files(stale, pool)
+    s = RulesSafety()
+    totals = run_reflag(stale, pool, s)
+    for b, a in zip(before, bit_files(stale, pool)):
+        for tb, ta in zip(b["threads"], a["threads"]):
+            if tb["safe"]:
+                assert json.dumps(ta, sort_keys=True) == json.dumps(tb, sort_keys=True)
+    a, b, c = ids(pool)
+    assert {tuple(x.split()[:2]) for x in s.checked} == {(a, "t3"), (a, "t4"), (b, "t0"), (b, "t4"), *((c, f"t{i}") for i in (1, 2, 3, 4))}
+    assert totals["freed"] == 5 and totals["still_rejected"] == 3 and totals["infra"] == 0 and totals["bits"] == 3
+
+
+def test_a_freed_thread_gets_a_fresh_llm_verdict_and_keeps_the_old_reasons(pool, stale):
+    s = RulesSafety()
+    run_reflag(stale, pool, s)
+    rec = bit_files(stale, pool)[0]
+    assert s.prefetched[:10] == [x for i in (3, 4) for x in rec["threads"][i]["lines"]]  # the LLM layer ran on them
+    t = rec["threads"][3]
+    assert t["safe"] and t["rejected"] == [] and t["rejected_v3"] == ["rule:name"] and t["reflag"]["rules"] == "rules-v4" and t["reflag"]["at"]
+    assert not rec["threads"][4]["safe"] and rec["threads"][4]["rechecked"]["rules"] == "rules-v4" and "reflag" not in rec["threads"][4]
+    assert rec["safety_rules"] == "rules-v3" and rec["reflags"][0]["freed"] == 1
+
+
+def test_reflag_sets_the_bits_allow_lists_before_checking(pool, stale):
+    seen = {}
+
+    class Spy(RulesSafety):
+        def prefetch(self, texts, age):
+            seen[texts[0].split()[0]] = self.allow_caps
+    dp.reflag("train", Spy(), pool, QWEN, stale, out=lambda *_: None)
+    days = {d["date"]: d for d in pool["days"]}
+    for p in train_prompts(pool, 3):
+        t = dp.tonight_for(p, days)
+        assert seen[p["id"]] == (t.allow_caps if t else frozenset())
+
+
+def test_an_outage_leaves_the_thread_unchanged_is_counted_and_a_rerun_retries_it(pool, stale):
+    before = bit_files(stale, pool)
+    totals = run_reflag(stale, pool, RulesSafety(fail=True))
+    for b, a in zip(before, bit_files(stale, pool)):
+        assert a["threads"][3] == b["threads"][3]  # thread 3 hit the outage (or was safe)
+    assert totals["infra"] == 2  # bit 1's thread 3 was already safe
+    again = run_reflag(stale, pool, RulesSafety())
+    assert again["infra"] == 0 and bit_files(stale, pool)[0]["threads"][3]["safe"]
+    s = RulesSafety()
+    assert run_reflag(stale, pool, s)["freed"] == 0 and s.checked == []  # settled: nothing is paid for twice
+
+
+def test_reflagged_threads_only_add_pairs_and_never_displace_a_labelled_one(pool, stale):
+    before = bit_files(stale, pool)
+    old = [dt.thread_pairs(r) for r in before]
+    assert old == [[(0, 1), (0, 2), (1, 2)], [(1, 2), (1, 3), (2, 3)], []]
+    run_reflag(stale, pool)
+    after = bit_files(stale, pool)
+    new = [dt.thread_pairs(r) for r in after]
+    assert new[0] == old[0] and new[1] == old[1]  # three clean from the start: nothing gained, though bit 1's thread 0 was freed
+    assert new[2] == [(0, 1), (0, 2), (1, 2)] and dp.pair_for(after[2]) is not None
+    assert dp.pair_for(before[0]) == dp.pair_for(after[0]) and dp.pair_for(before[1]) == dp.pair_for(after[1])
+
+
+def test_a_second_label_run_after_reflag_calls_only_for_the_new_pairs(pool, stale):
+    first = FakeJudge()
+    dt.label_all(first, "train", QWEN, teach_pairs(), pool, stale, out=lambda *_: None)
+    assert len(first.calls) == 6 * 2  # bits 0 and 1: 3 pairs each, both orders
+    before = dt.read_jsonl(dt.label_file(stale, "train", QWEN))
+    run_reflag(stale, pool)
+    second = FakeJudge()
+    dt.label_all(second, "train", QWEN, teach_pairs(), pool, stale, out=lambda *_: None)
+    assert len(second.calls) == 3 * 2  # bit 2's three new pairs only
+    after = dt.read_jsonl(dt.label_file(stale, "train", QWEN))
+    assert [r for r in after if r["bit"] != ids(pool)[2]] == before and len(after) == 9
+    third = FakeJudge()
+    dt.label_all(third, "train", QWEN, teach_pairs(), pool, stale, out=lambda *_: None)
+    assert third.calls == []
+
+
+def test_the_manifest_counts_threads_by_rules_and_pairs_from_reflagged_threads(pool, stale):
+    dp._write(dp.pool_path(stale), pool)
+    ranking_bits(pool, stale)
+    dt.label_all(FakeJudge(), "train", QWEN, teach_pairs(), pool, stale, out=lambda *_: None)
+    first = dt.export(QWEN, stale, out=lambda *_: None)
+    assert first["pairs_from_reflagged_threads"] == 0 and first["safe_threads_by_rules"] == {"rules-v3": 7}
+    old_ids = {r["id"] for r in dt.read_jsonl(stale / "train" / "dpo_B.jsonl")}
+    run_reflag(stale, pool)
+    dt.label_all(FakeJudge(), "train", QWEN, teach_pairs(), pool, stale, out=lambda *_: None)
+    m = dt.export(QWEN, stale, out=lambda *_: None)
+    assert m["safe_threads_by_rules"] == {"rules-v3": 7, "rules-v4": 5} and m["pairs_total"] == 9 and m["pairs_from_reflagged_threads"] == 3
+    assert old_ids <= {r["id"] for r in dt.read_jsonl(stale / "train" / "dpo_B.jsonl")}

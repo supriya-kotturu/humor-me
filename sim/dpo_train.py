@@ -1,6 +1,7 @@
 """D-123: label the training pool with Haiku, export the datasets Explorer trains on, build the Modelfile for a trained writer.
 
 Usage (after `python -m sim.dpo_pairs write --split train --writer qwen3:4b-instruct`, see sim/dpo_pairs.py):
+    python -m sim.dpo_pairs reflag --split train --writer qwen3:4b-instruct --env-file backend/.env   # once, after the rules fix (D-125)
     python -m sim.dpo_pairs label  --split train --writer qwen3:4b-instruct --env-file backend/.env   # Haiku, resumable, prints cost
     python -m sim.dpo_pairs export --writer qwen3:4b-instruct                                         # -> data/dpo/train/
     python -m sim.dpo_pairs modelfile --base Modelfile.base --gguf humor-qwen3-B-Q4_K_M.gguf --out Modelfile.B
@@ -58,8 +59,12 @@ def usage_file(root: pathlib.Path, split: str, writer: str) -> pathlib.Path:
 
 def thread_pairs(rec: dict) -> list[tuple[int, int]]:
     """Every pair among the bit's first MAX_THREADS_PER_BIT clean threads, as thread indices (i < j)."""
-    clean = [i for i, t in enumerate(rec["threads"]) if t.get("safe")][:MAX_THREADS_PER_BIT]
-    return list(itertools.combinations(clean, 2))
+    ts = rec["threads"]
+    clean = [i for i, t in enumerate(ts) if t.get("safe")]
+    # Threads freed by a re-flag (D-123) go behind the ones that were clean from the start, so they only fill a bit's free
+    # slots: a pair already labelled is never displaced, and a bit with 3 original clean threads gains nothing.
+    clean = ([i for i in clean if not ts[i].get("reflag")] + [i for i in clean if ts[i].get("reflag")])[:MAX_THREADS_PER_BIT]
+    return [tuple(sorted(c)) for c in itertools.combinations(clean, 2)]
 
 
 def written_bits(split: str, writer: str, pool: dict, root: pathlib.Path) -> list[tuple[dict, dict]]:
@@ -382,7 +387,15 @@ def export(writer: str, root: pathlib.Path | None = None, split: str = "train", 
     files = {"sft_B.jsonl": sft, "dpo_B.jsonl": dpo_b, "dpo_C.jsonl": dpo_c, "eval_prompts.jsonl": eval_prompts}
     for name, data in files.items():
         write_jsonl(d / name, data)
-    manifest = {"writer": writer, "pool_digest": pool["digest"], "rank_answers_digest": dp.answers_digest(state),
+    safe_by_rules: dict[str, int] = {}
+    for b in bits.values():
+        for t in b["threads"]:
+            if t.get("safe"):
+                k = (t.get("reflag") or {}).get("rules") or dp.thread_rules(b, t) or "unknown"
+                safe_by_rules[k] = safe_by_rules.get(k, 0) + 1
+    from_reflag = sum(any(bits[r["bit"]]["threads"][k].get("reflag") for k in (r["i"], r["j"])) for r in rows if r["bit"] in bits)
+    manifest = {"writer": writer, "safe_threads_by_rules": dict(sorted(safe_by_rules.items())),
+                "pairs_from_reflagged_threads": from_reflag, "pairs_total": len(rows), "pool_digest": pool["digest"], "rank_answers_digest": dp.answers_digest(state),
                 "labels_digest": sha(path), "labels": summary, "sft_rule": RULE_SFT, "B": counts_b, "C": counts_c,
                 "eval_prompts": len(eval_prompts), "eval_seed": EVAL_SEED,
                 "files": {name: {"rows": len(data), "sha8": sha(d / name)} for name, data in files.items()},

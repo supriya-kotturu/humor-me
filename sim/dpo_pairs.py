@@ -19,6 +19,7 @@ shares the one GPU and the show's 12 s bit deadline would suffer):
 
 D-123 (the pool for training, see sim/dpo_train.py and sim/dpo_eval.py; the full run order is in explorer/README.md):
     python -m sim.dpo_pairs write --split train --writer qwen3:4b-instruct --env-file backend/.env   # -> data/dpo/bits/train-qwen3/
+    python -m sim.dpo_pairs reflag --split train --writer qwen3:4b-instruct --env-file backend/.env  # after the rules fix (D-125): free wrongly rejected threads
     python -m sim.dpo_pairs label --split train --writer qwen3:4b-instruct --env-file backend/.env   # Haiku, both orders
     python -m sim.dpo_pairs export --writer qwen3:4b-instruct                                         # -> data/dpo/train/
     python -m sim.dpo_pairs eval write|plan|power|bar|vote|judge|score ...                             # Exp 38
@@ -57,6 +58,7 @@ import json
 import os
 import pathlib
 import random
+import re
 import sys
 import threading
 import time
@@ -601,6 +603,94 @@ def topup(split: str, client, live_safety, pool: dict, root: pathlib.Path | None
     return added
 
 
+# --- re-flag (D-123, user's choice 2026-11-27) -----------------------------------------------------------------------------
+
+def rules_number(version: str) -> int:
+    """'rules-v4' -> 4."""
+    return int(re.search(r"(\d+)$", version).group(1))
+
+
+def thread_rules(rec: dict, t: dict) -> str | None:
+    """The safety rules version a thread was checked under: its top-up batch's, else the bit's."""
+    if t.get("batch"):
+        for top in rec.get("topups", []):
+            if top.get("batch") == t["batch"]:
+                return top.get("rules")
+    return rec.get("safety_rules")
+
+
+def recorded_rules(recs: list[dict]) -> list[str]:
+    return [v for rec in recs for v in [rec.get("safety_rules"), *(top.get("rules") for top in rec.get("topups", []))] if v]
+
+
+def reflag_one(rec: dict, live_safety, prompt: dict, days: dict[str, dict], now: str) -> tuple[dict, dict]:
+    """Re-runs the show's safety check (rules, then the LLM layer, with the bit's allow lists) on the bit's threads that are
+    not safe and were last checked under older rules. A thread that passes becomes `safe` (old reasons kept as
+    `rejected_vN`, plus `reflag`); one that still fails records the new reasons in `rechecked` so a rerun does not pay again;
+    one whose check hit an outage is left as it was. Safe threads are never touched. Returns (new record, counts)."""
+    cur = safety.RULES_VERSION
+    idx = [i for i, t in enumerate(rec["threads"]) if not t.get("safe") and t.get("lines")
+           and (t.get("rechecked") or {}).get("rules") != cur and rules_number(thread_rules(rec, t) or "rules-v0") < rules_number(cur)]
+    counts = {"freed": 0, "still_rejected": 0, "infra": 0}
+    if not idx:
+        return rec, counts
+    set_allow(live_safety, prompt, days)
+    copies = [{"lines": list(rec["threads"][i]["lines"])} for i in idx]
+    check_threads(copies, live_safety, prompt["context"]["age"])
+    out = {**rec, "threads": [dict(t) for t in rec["threads"]]}
+    for i, c in zip(idx, copies):
+        t = out["threads"][i]
+        if any(r.startswith("llm:error") or r == "llm:no verdict" for r in c["rejected"]):
+            counts["infra"] += 1
+        elif c["safe"]:
+            old = thread_rules(rec, t) or "rules-v0"
+            t.update({f"rejected_v{rules_number(old)}": t.get("rejected", []), "rejected": [], "safe": True,
+                      "reflag": {"rules": cur, "at": now}})
+            counts["freed"] += 1
+        else:
+            t["rechecked"] = {"rules": cur, "rejected": c["rejected"]}
+            counts["still_rejected"] += 1
+    if counts["freed"] or counts["still_rejected"]:
+        out["reflags"] = list(rec.get("reflags", [])) + [{"rules": cur, "at": now, **counts}]
+    return out, counts
+
+
+def reflag(split: str, live_safety, pool: dict, writer: str, root: pathlib.Path | None = None, out=print) -> dict:
+    """D-125 fixed rules-v3's name check, which wrongly rejected about 14% of qwen3 threads, mostly quoted dialogue and casual
+    openers. Re-checks every not-safe thread of the writer's finished bits under the current rules and keeps the ones that now
+    pass. Refuses unless the current rules are newer than every rules version recorded in the bits. Resumable (each bit is
+    saved whole, atomically), outages leave a thread as it was and are counted. Returns the totals."""
+    root = root or DATA
+    cur = safety.RULES_VERSION
+    days = {d["date"]: d for d in pool["days"]}
+    todo = [(p, r) for p in pool["prompts"] if p["split"] == split
+            and (r := _read(bit_path(root, split, p["id"], writer))) is not None and same_prompt(r, p, writer) and done(r)]
+    seen = recorded_rules([r for _, r in todo])
+    if not seen:
+        raise SystemExit(f"no finished bits of {writer} in {split}: nothing to re-flag")
+    if rules_number(cur) <= max(rules_number(v) for v in seen):
+        raise SystemExit(f"safety.RULES_VERSION is {cur}, not newer than the rules the bits were written with ({max(seen, key=rules_number)}): "
+                         "merge the rules fix (PR #91, D-125) first")
+    now = stamp()
+    total = {"bits": 0, "freed": 0, "still_rejected": 0, "infra": 0}
+    for n, (p, rec) in enumerate(todo, 1):
+        new, c = reflag_one(rec, live_safety, p, days, now)
+        if new is not rec:
+            _write(bit_path(root, split, p["id"], writer), new)
+            total["bits"] += 1
+            out(f"[{n}/{len(todo)}] {p['id']}: {c['freed']} freed, {c['still_rejected']} still rejected, {c['infra']} outage")
+        for k in ("freed", "still_rejected", "infra"):
+            total[k] += c[k]
+    client = getattr(live_safety, "client", None)
+    toks = {k: getattr(client, k, 0) for k in ("input_tokens", "output_tokens")}
+    from sim import dpo_train  # noqa: PLC0415 - dpo_train imports this module
+    total["cost_usd"] = dpo_train.cost_usd({"input": toks["input_tokens"], "output": toks["output_tokens"]})
+    out(f"re-flagged under {cur}: {total['freed']} threads freed in {total['bits']} bits, {total['still_rejected']} still rejected, "
+        f"{total['infra']} left unchanged by an outage{' (rerun to retry them)' if total['infra'] else ''}; "
+        f"safety calls in {toks['input_tokens']}, out {toks['output_tokens']}, about ${total['cost_usd']:.3f} at Haiku's price")
+    return total
+
+
 # --- ranking -------------------------------------------------------------------------------------------------------------
 
 def read_state(root: pathlib.Path) -> dict:
@@ -612,6 +702,8 @@ def pair_for(rec: dict | None) -> tuple[int, int] | None:
     if rec is None:
         return None
     clean = [i for i, t in enumerate(rec["threads"]) if t.get("safe")]
+    if len([i for i in clean if not rec["threads"][i].get("reflag")]) >= 2:
+        clean = [i for i in clean if not rec["threads"][i].get("reflag")]  # a re-flag (D-123) never changes a pair already shown
     if len(clean) < 2:
         return None
     left, right = random.Random(f"{RANK_SEED}:pair:{rec['id']}").sample(clean, 2)
@@ -1037,7 +1129,7 @@ def table(res: dict, which: str = "haiku") -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("command", choices=("pool", "write", "topup", "rank", "rerank", "judge", "score", "label", "export", "modelfile", "eval"))
+    ap.add_argument("command", choices=("pool", "write", "topup", "reflag", "rank", "rerank", "judge", "score", "label", "export", "modelfile", "eval"))
     ap.add_argument("sub", nargs="?", help="eval: write, plan, power, bar, vote, judge or score")
     ap.add_argument("--writer", help="write, topup, label, export: the model that writes (default: the live writer); eval write: A, B, C or a model name")
     ap.add_argument("--workers", type=int, default=4, help="label: parallel Haiku calls after the first (which writes the prompt cache)")
@@ -1092,6 +1184,19 @@ def main() -> None:
         except KeyboardInterrupt:
             raise SystemExit("stopped; finished bits are saved, rerun to resume")
         print(f"wrote {wrote} new bits")
+        return
+    if a.command == "reflag":
+        if a.split != "train":
+            raise SystemExit("reflag --split train")
+        pool = _read(pool_path())
+        if pool is None:
+            raise SystemExit("run `python -m sim.dpo_pairs pool` first")
+        live_safety = generate.LiveSafety(llm.from_env(generate.FILTER_TIMING[0], role="safety_check", retries=generate.FILTER_RETRIES,
+                                                       deadline_s=generate.FILTER_TIMING[1]))
+        try:
+            reflag(a.split, live_safety, pool, a.writer or live_writer())
+        except KeyboardInterrupt:
+            raise SystemExit("stopped; finished bits are saved, rerun to resume")
         return
     if a.command == "modelfile":
         from sim import dpo_train

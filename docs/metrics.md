@@ -1187,7 +1187,7 @@ Decision: [D-123](agent/decisions-detail.md#d-123) (the model is chosen in [D-12
 
 What it tests: three writers start from the same base model. **A** is the base, **B** is trained toward Claude Haiku's taste (a judge's, not the audience's), **C** is trained on your own 120 pairs. Each writes one bit for each of 60 new prompts. You vote blind on 30 pairs: 15 of B against A and 15 of C against A. Opus 5.5 judges all three pairings (B against C too) on all 60 prompts; that is reported only. Haiku is reported too, but it wrote B's training labels, so for B it is marking its own homework.
 
-**The win bar is not fixed yet.** The proposal is at least 10 wins out of 15 decided pairs in a comparison. You confirm it (`eval bar --wins N`) before the first vote. The re-rank says your votes are noisy: you repeat a pick 60% of the time, so a writer you truly prefer 75% of the time shows up winning only about 61% to 66% of votes, and reaches 10 of 15 only 44% to 60% of the time. Read the columns below as true rates, which the votes will understate.
+**The win bar is not fixed yet.** The proposal is at least 10 wins out of 15 decided pairs in a comparison. You confirm it (`eval bar --wins N`) before the first vote. The re-rank says your votes are noisy: you repeat a pick 60% of the time, so a writer you truly prefer 75% of the time shows up winning only about 61% to 66% of votes, and reaches 10 of 15 only 43% to 60% of the time. Read the columns below as true rates, which the votes will understate.
 
 | Bar (wins of 15 decided) | A coin flip gets there | A writer that truly wins 65% | 70% | 75% |
 |---|---|---|---|---|

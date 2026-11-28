@@ -28,7 +28,7 @@ Training toward a judge's taste is called **RLAIF**. It can go wrong in a quiet 
 
 ## The test (Exp 38)
 
-Sixty new prompts, one bit from each writer for each. The user votes blind on 30 pairs (15 B against A, 15 C against A). The number of wins that counts as "funnier" is fixed by the user before the first vote; the proposal is 10 of 15, which a coin flip reaches 15% of the time. Fifteen pairs cannot see a small gain, so "not met" means "not shown". Opus judges every pairing too, and the report shows it beside the votes, never in place of them. A writer also has to be fast enough: its slowest 5% of bits within the 12 s budget.
+Sixty new prompts, one bit from each writer for each. The user votes blind on 30 pairs (15 B against A, 15 C against A). The number of wins that counts as "funnier" is fixed by the user before the first vote; the proposal is 10 of 15, which a coin flip reaches 15% of the time. Your votes are noisy (you repeat a pick 60% of the time), so a real gain shows up smaller than it is. Fifteen pairs cannot see a small gain, so "not met" means "not shown". Opus judges every pairing too, and the report shows it beside the votes, never in place of them. A writer also has to be fast enough: its slowest 5% of bits within the 12 s budget, and almost none of its calls (at most 5%) cut off by that budget.
 
 ## Which model
 

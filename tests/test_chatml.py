@@ -59,3 +59,13 @@ def test_the_reply_is_trained_after_the_open_assistant_turn():
 def test_consecutive_messages_of_a_role_merge_like_ollamas():
     got = chatml.render_ollama([{"role": "system", "content": "A"}, {"role": "system", "content": "B"}, {"role": "user", "content": "U"}])
     assert got.startswith("<|im_start|>system\nA\n\nB\n\n<|im_end|>\n")
+
+
+def test_a_row_longer_than_max_length_stops_training_before_trl_can_truncate_it():
+    from explorer import train_common as tcm
+    tok = lambda text, add_special_tokens=False: {"input_ids": text.split()}  # noqa: E731 - one token a word
+    rows = [{"prompt": "a b c", "chosen": "d e", "rejected": "f g h i"}]
+    assert tcm.longest(tok, rows, ("chosen", "rejected")) == 3 + 4 + 1  # the longer reply and the end token
+    tcm.check_lengths(tok, rows, ("chosen", "rejected"), 8)
+    with pytest.raises(SystemExit, match="over --max-length 7"):
+        tcm.check_lengths(tok, rows, ("chosen", "rejected"), 7)

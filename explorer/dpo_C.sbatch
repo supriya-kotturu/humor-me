@@ -18,4 +18,4 @@ source explorer/env.sh
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export TOKENIZERS_PARALLELISM=false
 RUNS=data/dpo/train/runs
-python -m explorer.train_dpo --data data/dpo/train/dpo_C.jsonl --out $RUNS/dpo_C --epochs "${EPOCHS:-3}" ${LR:+--lr "$LR"}
+python -m explorer.train_dpo --data data/dpo/train/dpo_C.jsonl --out $RUNS/dpo_C --epochs "${EPOCHS:-3}" ${LR:+--lr "$LR"} ${DTYPE:+--dtype "$DTYPE"}

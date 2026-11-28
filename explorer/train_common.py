@@ -26,6 +26,21 @@ def dpo_rows(rows: list[dict]) -> list[dict]:
     return [{"prompt": render_ollama(r["prompt"]), "chosen": r["chosen"], "rejected": r["rejected"]} for r in rows]
 
 
+def longest(tok, rows: list[dict], replies: tuple[str, ...]) -> int:
+    """Tokens of the longest prompt + reply + end token among `rows` (rendered rows: prompt text and reply columns)."""
+    n = lambda text: len(tok(text, add_special_tokens=False)["input_ids"])  # noqa: E731
+    return max((n(r["prompt"]) + max(n(r[k]) for k in replies) + 1 for r in rows), default=0)
+
+
+def check_lengths(tok, rows: list[dict], replies: tuple[str, ...], max_length: int) -> None:
+    """Refuses to train when any row is longer than `max_length`: TRL would truncate it silently (the system text or the
+    reply's end), and a writer trained on cut prompts or replies with no end token is not the one the show serves."""
+    top = longest(tok, rows, replies)
+    print(f"[data] longest row {top} tokens (max_length {max_length})", flush=True)
+    if top > max_length:
+        raise SystemExit(f"a row is {top} tokens, over --max-length {max_length}: raise --max-length")
+
+
 def versions() -> str:
     import accelerate
     import peft
@@ -46,12 +61,15 @@ def config_kwargs(cls, wanted: dict) -> dict:
     return {k: v for k, v in wanted.items() if k in fields}
 
 
-def load_model(base: str):
-    """fp16 weights on the V100 (no bfloat16), SDPA attention (no flash-attn on Volta). PEFT keeps the LoRA weights in fp32."""
+def load_model(base: str, dtype: str = "fp16"):
+    """fp16 weights on the V100 (no bfloat16), SDPA attention (no flash-attn on Volta). PEFT keeps the LoRA weights in fp32.
+    `fp32` is the fallback when fp16 overflows (a NaN stop): 16 GB of weights still fit the 32 GB card, and fp16 autocast
+    keeps the matmuls fast while the residual stream stays fp32."""
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
     tok = AutoTokenizer.from_pretrained(base)
-    model = AutoModelForCausalLM.from_pretrained(base, torch_dtype=torch.float16, attn_implementation="sdpa")
+    model = AutoModelForCausalLM.from_pretrained(base, torch_dtype={"fp16": torch.float16, "fp32": torch.float32}[dtype],
+                                                 attn_implementation="sdpa")
     return model, tok
 
 

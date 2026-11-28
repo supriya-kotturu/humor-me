@@ -20,4 +20,4 @@ export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export TOKENIZERS_PARALLELISM=false
 RUNS=data/dpo/train/runs
 [ -f $RUNS/merged_sft_B/config.json ] || python -m explorer.merge_lora --adapter $RUNS/sft_B --out $RUNS/merged_sft_B --device cuda
-python -m explorer.train_dpo --data data/dpo/train/dpo_B.jsonl --base $RUNS/merged_sft_B --out $RUNS/dpo_B ${EPOCHS:+--epochs "$EPOCHS"} ${LR:+--lr "$LR"}
+python -m explorer.train_dpo --data data/dpo/train/dpo_B.jsonl --base $RUNS/merged_sft_B --out $RUNS/dpo_B ${EPOCHS:+--epochs "$EPOCHS"} ${LR:+--lr "$LR"} ${DTYPE:+--dtype "$DTYPE"}

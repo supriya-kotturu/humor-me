@@ -162,7 +162,7 @@ Ollama's chat layout, not Hugging Face's (`explorer/chatml.py`, D-124). Times ar
 | 3 | laptop | `python -m sim.dpo_pairs export --writer qwen3:4b-instruct`: writes `data/dpo/train/` (`sft_B`, `dpo_B`, `dpo_C`, `eval_prompts`, `manifest.json`) | seconds | none |
 | 4 | laptop | `scp data/dpo/train/{sft_B,dpo_B,dpo_C}.jsonl data/dpo/train/manifest.json <you>@<explorer login host>:/courses/CS5180.202710/students/<you>/humor-me/data/dpo/train/` (make the folder first; or the OOD Files app). `eval_prompts.jsonl` stays on the laptop | minutes | none |
 | 5 | cluster, once | `git fetch && git checkout feat/dpo-train` (or `main` once merged), then install the training libraries into the same venv: `sbatch -p courses --cpus-per-task=4 --mem=32G --time=01:00:00 -o logs/setup-train-%j.out --wrap 'source explorer/env.sh; uv pip install -r explorer/requirements-train.txt -c explorer/requirements-cluster.txt --index-strategy unsafe-best-match'` | about 5 min | none |
-| 6 | cluster | `mkdir -p logs && sbatch explorer/smoke.sbatch`, then read `logs/humor-smoke-<id>.out`: the versions, `[template] tokenizer == render_hf`, `[model] ... all fp32`, a loss for each of 10 steps and no NaN, `[memory] peak`, seconds per step, and the tail of each tokenized example (the end token `<|im_end|>` once). **Do not submit anything long until this looks right.** | 15 to 30 min (first run downloads the 8 GB model) | none |
+| 6 | cluster | `mkdir -p logs && sbatch explorer/smoke.sbatch`, then read `logs/humor-smoke-<id>.out`: the versions, `[template] tokenizer == render_hf`, `[model] ... all fp32`, `[data] longest row` under 1536, a loss for every step and no NaN, the second B run continuing from `checkpoint-6`, `[memory] peak`, seconds per step, and the tail of each tokenized example (the end token `<|im_end|>` once). **Do not submit anything long until this looks right.** | 30 to 45 min (first run downloads the 8 GB model) | none |
 | 7 | cluster | `sbatch explorer/sft_B.sbatch` | about 1 to 2 h | none |
 | 8 | cluster | `sbatch explorer/dpo_B.sbatch` (merges the SFT adapter first) | 3 to 6 h | none |
 | 9 | cluster | `sbatch explorer/dpo_C.sbatch` (independent of B; `courses-gpu` runs one job at a time, so queue it behind or before B) | under 1 h | none |
@@ -176,7 +176,7 @@ Ollama's chat layout, not Hugging Face's (`explorer/chatml.py`, D-124). Times ar
 | 17 | laptop | `python -m sim.dpo_pairs eval score --record`, then `python scripts/run_notebook.py notebooks/decisions-model.ipynb` | minutes | none |
 
 An interrupted Slurm job: submit the same command again (training resumes from the last checkpoint, saved every 25 steps, and a job saves
-and stops itself at 7.5 h). A NaN loss or gradient norm stops a run with exit code 3: lower `LR=` (`LR=5e-6 sbatch explorer/dpo_B.sbatch`).
+and stops itself at 7.5 h). A NaN loss or gradient norm stops a run with exit code 3: lower `LR=` (`LR=5e-6 sbatch explorer/dpo_B.sbatch`); if it stops again, fp16 itself is overflowing: `DTYPE=fp32` loads the base in fp32 (slower, still fits).
 If the reward accuracy stays at 0.5 after a few dozen steps, raise it. Outputs live under `data/dpo/train/runs/` on the cluster.
 
 ## Storage: what survives where

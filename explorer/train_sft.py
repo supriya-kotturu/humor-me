@@ -22,13 +22,16 @@ def main() -> None:
     ap.add_argument("--max-steps", type=int, default=-1, help="the smoke test sets 10")
     ap.add_argument("--max-hours", type=float, default=7.5, help="save and stop this long after the start (the job limit is 8 h)")
     ap.add_argument("--save-steps", type=int, default=25)
+    ap.add_argument("--dtype", default="fp16", choices=("fp16", "fp32"), help="base weights; fp32 if fp16 stops on a NaN")
     a = ap.parse_args()
     from datasets import Dataset
     from peft import LoraConfig
     from trl import SFTConfig, SFTTrainer
     print(tcm.versions(), flush=True)
-    model, tok = tcm.load_model(a.base)
-    data = Dataset.from_list(tcm.sft_rows(tcm.read_jsonl(a.data)))
+    model, tok = tcm.load_model(a.base, a.dtype)
+    rows = tcm.sft_rows(tcm.read_jsonl(a.data))
+    tcm.check_lengths(tok, rows, ("completion",), a.max_length)
+    data = Dataset.from_list(rows)
     print(f"[data] {len(data)} rows; prompt tail {data[0]['prompt'][-60:]!r}", flush=True)
     cfg = SFTConfig(**tcm.config_kwargs(SFTConfig, dict(
         output_dir=a.out, learning_rate=a.lr, num_train_epochs=a.epochs, max_steps=a.max_steps, per_device_train_batch_size=1,

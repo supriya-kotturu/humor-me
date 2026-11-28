@@ -1203,7 +1203,7 @@ def main() -> None:
         if not (a.base and a.gguf and a.out):
             raise SystemExit("modelfile needs --base, --gguf and --out")
         pathlib.Path(a.out).write_text(dpo_train.modelfile_for(pathlib.Path(a.base).read_text(encoding="utf-8"), a.gguf), encoding="utf-8")
-        print(f"wrote {a.out}: `ollama create <name> -f {a.out}`")
+        print(f"wrote {a.out}: `cd {pathlib.Path(a.out).parent} && ollama create <name> -f {pathlib.Path(a.out).name}` (Ollama reads FROM ./ against the current folder)")
         return
     if a.command == "export":
         from sim import dpo_train

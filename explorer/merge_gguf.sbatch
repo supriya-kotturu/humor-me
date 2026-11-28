@@ -4,8 +4,8 @@
 #   WRITER=C ADAPTER=data/dpo/train/runs/dpo_C sbatch explorer/merge_gguf.sbatch      # BASE defaults to Qwen/Qwen3-4B-Instruct-2507
 # Output: data/dpo/train/runs/gguf/humor-qwen3-<WRITER>-Q4_K_M.gguf (about 2.5 GB), to copy back to the laptop.
 # Steps: merge_and_unload to fp16 safetensors, llama.cpp convert_hf_to_gguf.py --outtype f16, build llama-quantize once, quantize.
-# First run builds llama.cpp under $COURSE_DIR/llama.cpp: it needs a compiler and cmake (`module avail gcc cmake` if the job says
-# they are missing; add the module names to the line below).
+# First run builds llama.cpp under $COURSE_DIR/llama.cpp: it needs a C++ compiler and cmake. CPU nodes have no cmake on PATH, so the
+# job installs the PyPI build into the venv when it is missing; a missing compiler stops the job before any work (`module avail gcc`).
 #SBATCH --job-name=humor-gguf
 #SBATCH --partition=courses
 #SBATCH --cpus-per-task=8
@@ -23,9 +23,13 @@ RUNS=data/dpo/train/runs
 MERGED=$RUNS/merged_$WRITER
 GGUF=$RUNS/gguf
 NAME=humor-qwen3-$WRITER
+LLAMA=$COURSE_DIR/llama.cpp
+if [ ! -x "$LLAMA/build/bin/llama-quantize" ]; then
+    command -v cmake >/dev/null || uv pip install cmake
+    command -v c++ >/dev/null || { echo "[stop] no C++ compiler on PATH: load a gcc module (module avail gcc)" >&2; exit 2; }
+fi
 mkdir -p "$GGUF"
 [ -f "$MERGED/config.json" ] || python -m explorer.merge_lora --adapter "$ADAPTER" --base "$BASE" --out "$MERGED" --device cpu
-LLAMA=$COURSE_DIR/llama.cpp
 [ -d "$LLAMA" ] || git clone --depth 1 https://github.com/ggml-org/llama.cpp "$LLAMA"
 python "$LLAMA/convert_hf_to_gguf.py" "$MERGED" --outtype f16 --outfile "$GGUF/$NAME-f16.gguf"
 if [ ! -x "$LLAMA/build/bin/llama-quantize" ]; then

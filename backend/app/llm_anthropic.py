@@ -18,6 +18,8 @@ PRICE_PER_MTOK = {"input": 0.10, "output": 0.50}
 # Adaptive thinking tokens count against max_tokens, so leave room for them; this is a cap, not a spend.
 MAX_TOKENS = 4096
 RETRY_STATUS_EXTRA = frozenset({408})  # a request timeout is the server saying "send it again"
+# These models reject `thinking: disabled` (400 at every effort); thinking stays on and `effort` is the only control.
+THINKING_ALWAYS_ON = ("claude-opus-5-5",)
 
 
 @dataclass
@@ -38,6 +40,11 @@ class Client:
     # Off sends `thinking: disabled` (Haiku 5.5 accepts it at effort high or below; we run low). Structured output still
     # holds the reply to the schema, so reasoning cannot leak into the parsed JSON. D-99 measures whether it is needed.
     thinking: bool = True
+    # Marks the system prompt as a cache breakpoint: for a long shared prefix asked about many times in a row (the DPO
+    # judge's teach examples). Off by default, so every other caller sends exactly what it always did.
+    cache_system: bool = False
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
     _built: Any = field(default=None, repr=False)
 
     def chat(self, system: str, user: str, *, json_reply: bool | dict = False, temperature: float = 0.0,
@@ -61,7 +68,9 @@ class Client:
         output_config: dict = {"effort": "low"}
         if isinstance(json_reply, dict):
             output_config["format"] = {"type": "json_schema", "schema": json_reply}
-        extra = {} if self.thinking else {"thinking": {"type": "disabled"}}
+        extra = {} if self.thinking or self.model in THINKING_ALWAYS_ON else {"thinking": {"type": "disabled"}}
+        if self.cache_system:
+            system = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
         try:
             resp = self._client().messages.create(
                 model=self.model, max_tokens=MAX_TOKENS, system=system,
@@ -93,7 +102,9 @@ class Client:
     def _text(self, resp) -> str:
         try:  # bookkeeping must never fail a good reply
             bump(self, input_tokens=int(getattr(resp.usage, "input_tokens", 0) or 0),
-                 output_tokens=int(getattr(resp.usage, "output_tokens", 0) or 0))
+                 output_tokens=int(getattr(resp.usage, "output_tokens", 0) or 0),
+                 cache_read_tokens=int(getattr(resp.usage, "cache_read_input_tokens", 0) or 0),
+                 cache_write_tokens=int(getattr(resp.usage, "cache_creation_input_tokens", 0) or 0))
         except Exception:
             pass
         # Content is only meaningful for a normal stop: a refusal or a cut-off reply must not be read as an answer.

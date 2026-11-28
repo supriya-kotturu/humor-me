@@ -1,0 +1,6 @@
+{"params": {"answers_digest": "1466530d", "judge_digest_": "4af1cf27", "judge_digest_opus": "0694a532", "key_digest": "422d6760", "picks_digest": "32792a0e", "pool_digest": "c66f28f4"}, "results": {
+  "raters": [{"rater": "Rater 1", "pairs": 30, "cant_pick": 7, "vs_user": {"agree": 10, "decided": 23, "range95": [0.2563, 0.6319]}, "by_cell": {"teach/plain": {"agree": 2, "decided": 5, "range95": [0.1176, 0.7693]}, "teach/tonight": {"agree": 3, "decided": 5, "range95": [0.2307, 0.8824]}, "test/plain": {"agree": 2, "decided": 7, "range95": [0.0822, 0.6411]}, "test/tonight": {"agree": 3, "decided": 6, "range95": [0.1876, 0.8124]}}, "test_vs_user": {"agree": 5, "decided": 13, "range95": [0.1771, 0.6448]}, "vs_judge": {"haiku": {"agree": 6, "decided": 10, "range95": [0.3127, 0.8318], "no_label": 3}, "opus": {"agree": 6, "decided": 11, "range95": [0.2801, 0.7873], "no_label": 2}}}],
+  "n_raters": 1,
+  "pairs": 30,
+  "cells": {"teach/plain": 8, "teach/tonight": 8, "test/plain": 7, "test/tonight": 7}
+}}

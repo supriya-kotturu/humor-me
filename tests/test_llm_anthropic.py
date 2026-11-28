@@ -380,3 +380,20 @@ def test_openai_client_counts_usage_and_a_odd_usage_block_never_fails_the_reply(
     assert c.chat("s", "u") == "hi" and c.input_tokens == 12
     body["usage"] = ["not", "a", "dict"]
     assert c.chat("s", "u") == "hi"
+
+
+def test_a_model_that_cannot_run_without_thinking_is_never_sent_disabled():
+    opus, sdk = client(message(text("ok")), model="claude-opus-5-5", thinking=False)
+    opus.chat("s", "u", json_reply={"type": "object"})
+    assert "thinking" not in sdk.calls[0] and sdk.calls[0]["output_config"]["effort"] == "low"
+
+
+def test_system_caching_is_opt_in_and_counts_cache_tokens():
+    plain, sdk_plain = client(message(text("ok")))
+    cached, sdk = client(SimpleNamespace(stop_reason="end_turn", content=[text("ok")], usage=SimpleNamespace(
+        input_tokens=5, output_tokens=2, cache_read_input_tokens=900, cache_creation_input_tokens=100)), cache_system=True)
+    plain.chat("long system", "u")
+    cached.chat("long system", "u")
+    assert sdk_plain.calls[0]["system"] == "long system"
+    assert sdk.calls[0]["system"] == [{"type": "text", "text": "long system", "cache_control": {"type": "ephemeral"}}]
+    assert (cached.cache_read_tokens, cached.cache_write_tokens, cached.input_tokens) == (900, 100, 5)

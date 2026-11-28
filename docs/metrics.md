@@ -1071,3 +1071,139 @@ Same decision and pairs design, run on HEAD 14f7bd0 (places, checked organisatio
 - The first run's name count used the old meaning (D-120), so the two filter results are not comparable.
 - No public figure was approved that day, so none of the 10 new bits named one; the public-figure rule is covered by the filter check only.
 
+
+## Does the judge agree with you on same-writer pairs? (Exp 36)
+
+Decision: [D-121](agent/decisions-detail.md#d-121), which carries out [D-102](agent/decisions-detail.md#d-102). Raw: `reports/metrics/dpo_judge_gate.json` (written by `score --record` after you run it). Code: `sim/dpo_pairs.py`.
+
+**Status: done (2026-11-27). The bar was not met.** Claude Haiku 5.5 does not predict your taste on same-writer pairs, so DPO does not run on its labels. [Exp 37](#does-claude-opus-55-agree-with-you-on-the-same-pairs-exp-37) tries Opus 5.5 on the same pairs.
+
+What it tests: DPO needs thousands of "which bit is funnier" labels, and only a judge can give that many. First it has to agree with you on bits of one request written by the same model, which are closer than the cross-model ballot of Exp 24. You rank 120 pairs. 60 teach the judge your taste, and 60 are held back as the test. The judge is Claude Haiku 5.5, your choice.
+
+**The bar (set before any data):** the judge sees each test pair in both orders. A pair it answers differently in the two orders gets no label (and is dropped from DPO too). It passes if it answers at least 30 of the 60 the same way, and among those its agreement with you has a likely range above 50%. The least that clears: 21 of 30, 30 of 45, 38 of 60.
+
+Chance of passing, if the judge is right this often in each order and its two orders err independently: 50%: 1.4%. 65%: 74%. 70%: 91%. 75%: 98%.
+
+Prompts: 240 for ranking and 800 for training, half with tonight's context and half without, none repeating an earlier experiment's prompt. One day of headlines only (21 approved summaries), so the training pool is rebuilt with 3 or more days before the judge labels it.
+
+Also reported, with no bar: how often the two orders disagree, agreement for each half, the count over all 60 pairs (a no-label pair counts as a miss), the rate if a no-label pair earned half, and your ties and skips.
+
+| Check | Result | Bar |
+|---|---|---|
+| Test pairs answered the same way in both orders | 46 of 60 | at least 30: met |
+| Of those, the judge picks your bit | 24 of 46 (52%) | likely range above 50% |
+| Likely range | 38% to 66% | lower end above 50%: **not met** |
+| Pairs where the two orders disagree | 23% | beside the bar |
+| Tonight half: consistent, agreeing | 20 of 30, 11 | beside the bar |
+| Plain half: consistent, agreeing | 26 of 30, 13 | beside the bar |
+| All 60 pairs, a no-label pair counted as a miss | 24 of 60 | beside the bar |
+| A no-label pair earning half | 0.517 | beside the bar |
+| Ties / skips while ranking | 12 / 12 of 144 answers | beside the bar |
+| Verdict | **fail** | the bar |
+
+Reading: the judge answered the same way in both orders often enough, but on those pairs it picks your bit about half the time, which is chance. 30 of 46 was the least that clears. Both halves sit near 50%.
+
+Ranking time: you report 12 to 16 hours over Nov 26 to 27, not the planned 70 minutes. The answers had no times, so this is your estimate, not a measurement. New answers now carry a time.
+
+Self-agreement (reported only, no bar; you re-ranked 20 pairs after Exp 37): you picked the same bit again on 12 of 20 (60%, likely range 39% to 78%). 3 re-picks were ties and count as disagreements; ignoring them, 12 of 17 (71%, 47% to 87%). If you pick your true favourite with probability p each time, repeat agreement is p^2 + (1-p)^2, so 60% to 71% means p of about 72% to 82%. Even a perfect copy of your taste would agree with one answer only about that often: the ceiling for a judge. Haiku (52%) is below it, but with 20 pairs the ranges overlap, so the data cannot separate "the judge does not share your taste" from "the pairs are too close to call". On the 10 test pairs among the 20, Haiku agreed in both orders on 3 (4 had orders disagreeing). The verdict is unchanged. Timing: median 62 s per answer, 31 minutes first to last.
+
+Top-up: about 40% of threads fail the show's safety check, so bits with fewer than 2 clean threads get up to 2 more batches on the same request (`topup`); bits you may already have seen are not changed.
+
+How you ran it: the commands are at the end of D-121.
+
+Caveats:
+- The Qwen judge D-102 named was never built, and the rewritten judge of D-114 only checks that lines connect, so this is the first judge of pairs.
+- A judge that favours one position loses pairs to "no label", so a fail may mean position bias; the disagreement share is reported for that.
+- Whether the judge stays right as DPO changes the model is not checked.
+- The test only covers pairs where you had a pick. Pairs you tie or skip are left out, so how the judge does on pairs you find equal is not measured.
+
+## Does Claude Opus 5.5 agree with you on the same pairs? (Exp 37)
+
+Decision: [D-122](agent/decisions-detail.md#d-122), after [Exp 36](#does-the-judge-agree-with-you-on-same-writer-pairs-exp-36) failed. Raw: `reports/metrics/dpo_judge_gate_opus.json` (written by `score --model opus --record`). Code: `sim/dpo_pairs.py`.
+
+**Status: done (2026-11-27). The bar was not met.** Opus 5.5 does not predict your taste on same-writer pairs either, so DPO does not run on either judge's labels.
+
+What it tests: the same question as Exp 36, on the same 60 teach and 60 test pairs, with Claude Opus 5.5 as the judge. Same prompt, same examples, both orders, same settings. One difference you should know: Opus 5.5 cannot run with thinking off, so its thinking is on at low effort, where Haiku's was off. One model only, picked before running.
+
+**The bar (set before any Opus answer).** The 60 test pairs were already used once, so a second look needs a stricter bar. Otherwise trying models until one passes would pass a judge with no skill about twice as often. It passes if it answers at least 30 of the 60 the same way in both orders, and among those its agreement with you has a likely range above 50% at the **97.5%** level (Exp 36 used 95%). The least that clears:
+
+| Pairs answered the same way in both orders | Exp 36 (95%) | Exp 37 (97.5%) |
+|---|---|---|
+| 30 | 21 | 22 |
+| 46 | 30 | 31 |
+| 60 | 38 | 39 |
+
+Chance of passing, if the judge is right this often in each order and its two orders err independently: 50%: 0.7%. 65%: 70%. 70%: 91%. 75%: 98%. (Exp 36's bar gave 1.4%, 74%, 91%, 98%.)
+
+**Cost (estimate, before running).** One request is about 18,400 tokens, 120 of them. At Opus 5.5 prices (4 dollars in and 20 out per million tokens, cache reads 0.20; check the price list): about **$1 to $3 with caching** (the shared examples are cached), **$9 to $11 without**. The output part is a guess (200 to 1,000 tokens a call, thinking included); `judge` prints the real totals. If it passes, labelling the training pairs (4,800 calls) would cost about $40 to $120 with caching.
+
+| Check | Result | Bar |
+|---|---|---|
+| Test pairs answered the same way in both orders | 53 of 60 | at least 30: met |
+| Of those, the judge picks your bit | 25 of 53 (47%) | likely range (97.5%) above 50% |
+| Likely range | 33% to 62% | lower end above 50%: **not met** (35 of 53 was the least) |
+| Pairs where the two orders disagree | 12% | beside the bar |
+| Tonight half: consistent, agreeing | 29 of 30, 13 | beside the bar |
+| Plain half: consistent, agreeing | 24 of 30, 12 | beside the bar |
+| All 60 pairs, a no-label pair counted as a miss | 25 of 60 | beside the bar |
+| A no-label pair earning half | 0.475 | beside the bar |
+| Ties / skips while ranking | 12 / 12 of 144 answers | beside the bar |
+| Verdict | **fail** | the bar |
+
+**Cost (measured).** 120 calls: 47,808 tokens in, 1,440 out, 2,864,806 cache reads, 24,074 cache writes. At the prices above: **$0.91**. The estimate was $1 to $3: Opus used almost no thinking tokens at low effort.
+
+**Do the two judges agree with each other?** (Reported only, no bar. Read from the two stored caches, no calls. Likely ranges at 97.5%.) On the 41 test pairs both judges answered the same way in both orders:
+
+| On those 41 pairs | Count | Share | Likely range |
+|---|---|---|---|
+| haiku-5.5 judge and opus-5.5 judge pick the same bit | 32 | 78% | 61% to 89% |
+| haiku-5.5 judge picks your bit | 20 | 49% | 32% to 65% |
+| opus-5.5 judge picks your bit | 19 | 46% | 30% to 63% |
+
+The teach pairs have no answers in either cache: they are in the judge's prompt, so they were never asked.
+
+Reading: the two judges agree with each other far more than either agrees with you. That fits a shared model taste that differs from yours. It also fits your picks on close pairs being noisy. Your re-rank of 20 pairs (below) could not fully tell these apart. 24 of 144 ranking answers were ties or skips, which says some pairs were hard for you too.
+
+Outcome: two strong judges at about a coin flip on same-model pairs (24 of 46, 25 of 53) is a clean negative result for "an LLM judge as a stand-in for one person's taste on close pairs". Per D-122's rule, DPO does not run on either judge's labels. You confirm the next step.
+
+How to run it:
+```
+python -m sim.dpo_pairs judge --model opus --env-file backend/.env
+python -m sim.dpo_pairs score --model opus --record
+```
+Both results go in the report.
+
+Caveats:
+- The same 60 test pairs are used twice. The stricter bar reduces the risk, it does not remove it.
+- Thinking is on for Opus and off for Haiku, so a difference between the two is the model and the thinking together.
+- You agree with yourself on 12 of 20 re-ranked pairs (60%, likely range 39% to 78%; 12 of 17, 71%, ignoring ties), so a perfect copy of your taste would match one answer only about 72% to 82% of the time (p^2 + (1-p)^2 model, a judgment call). The judges at 52% and 47% sit below that, but 20 pairs leave the ranges overlapping. On the 10 test pairs among the 20, Opus agreed in both orders on 4 (2 had orders disagreeing). Both verdicts are unchanged.
+- Re-rank timing: median 62 s per answer (gaps between consecutive answers), 31 minutes first to last. These were pairs you had already read once, so this does not estimate first-time ranking, which you report took far longer.
+
+## Do other people pick like you, or like the judges? (Exp 39)
+
+Decision: [D-122](agent/decisions-detail.md#d-122), evidence only. Raw: `reports/metrics/dpo_friend.json` (numbers only). Code: `sim/dpo_friend.py`.
+
+**Status: done (2026-11-27). Reported only, no bar, no decision.**
+
+What it tests: whether anyone else picks the bit you picked. One friend rated 30 of your ranked pairs (16 teach, 14 test) blind in a form. Judges are compared on test pairs only, where they answered the same way in both orders. "Can't pick" is left out.
+
+| Comparison | Agree | Likely range (95%) |
+|---|---|---|
+| Friend vs you | 10 of 23 (43%) | 26% to 63% |
+| Friend vs you, test pairs only | 5 of 13 | 18% to 64% |
+| Haiku 5.5 judge vs friend | 6 of 10 | 31% to 83% |
+| Opus 5.5 judge vs friend | 6 of 11 | 28% to 79% |
+| You vs yourself (re-rank, for scale) | 12 of 20 | 39% to 78% |
+
+By cell, friend vs you: teach/plain 2 of 5, teach/tonight 3 of 5, test/plain 2 of 7, test/tonight 3 of 6. The friend could not pick on 7 of 30 pairs.
+
+Reading: everyone is near a coin flip with everyone, except the two judges with each other (32 of 41, 78%). Same-writer pairs look too close for people to agree on, and the two models seem to share a taste of their own. One rater and 13 to 23 pairs cannot prove either: every range includes 50%.
+
+Caveats:
+- One rater. A second would add rater-against-rater and majority-against-you numbers (already coded).
+- Teach pairs cannot be used for the judges, so the judge rows rest on 10 and 11 pairs.
+
+How to run it:
+```
+python -m sim.dpo_friend score --csv data/dpo/friend/responses.csv --record
+```

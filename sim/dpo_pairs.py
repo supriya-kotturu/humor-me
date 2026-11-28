@@ -481,7 +481,8 @@ def topup_bit(client, live_safety, rec: dict, prompt: dict, days: dict[str, dict
     except Exception:  # noqa: BLE001 - no thread this time is not a crash
         return None
     request, lines_major, premises, lost = gen._bits[prompt["bit"]]
-    if request != rec["request"] or gen.generator_id != rec["generator_id"] or             request_digest(request, gen.generator_id) != rec["digest"]:
+    if (request != rec["request"] or gen.generator_id != rec["generator_id"]
+            or request_digest(request, gen.generator_id) != rec["digest"]):
         raise SystemExit(f"{rec['id']}: the request rebuilt from the pool is not the stored one; nothing was changed")
     batch = len(rec.get("topups", [])) + 1
     new = [{"premise": premises[i], "lines": [lines_major[j][i] for j in range(generate.JOKES)], "batch": batch}
@@ -854,11 +855,12 @@ def judge_vs_judge(pairs: list[dict], root: pathlib.Path | None = None) -> dict:
     both = [p for p in pairs if p["id"] in picks["haiku"] and p["id"] in picks["opus"]]
     same = sum(picks["haiku"][p["id"]] == picks["opus"][p["id"]] for p in both)
     z = Z["opus"]
-    out = {"pairs": len(both), "same": same, "same_range975": jc.wilson(same, len(both), z) if both else None}
+    rng = lambda k: [round(x, 4) for x in jc.wilson(k, len(both), z)] if both else None  # noqa: E731
+    out = {"pairs": len(both), "same": same, "same_range975": rng(same)}
     for w in sides:
         k = sum(picks[w][p["id"]] == p["winner"] for p in both)
         out[f"{w}_agrees_with_you"] = k
-        out[f"{w}_range975"] = jc.wilson(k, len(both), z) if both else None
+        out[f"{w}_range975"] = rng(k)
     out["teach_pairs_answered"] = sum(p["role"] == "teach" and any(letters.get((p["id"], o)) for letters in sides.values() for o in ORDERS)
                                       for p in pairs)
     return out
@@ -905,6 +907,8 @@ def score(root: pathlib.Path | None = None, which: str = "haiku") -> dict:
     letters = read_letters(pairs, root, which)
     res = summarize(pairs, letters, sum(a["choice"] == "t" for a in ans), sum(a["choice"] == "s" for a in ans), which)
     res["self_agreement"] = self_agreement(pool, state, read_rerank(root or DATA), pairs, letters)
+    if which == "opus":  # in the record, so the notebooks read it from reports/ and not from the gitignored caches
+        res["judge_vs_judge"] = judge_vs_judge(pairs, root)
     return res
 
 

@@ -989,6 +989,13 @@ def test_a_new_rank_or_rerank_answer_carries_a_utc_time_and_old_answers_still_sc
     assert len(dp.decided({"answers": old}, pool)) and sum(dp.decided({"answers": old}, pool).values()) == 120
 
 
+def test_the_opus_record_carries_judge_vs_judge_so_notebooks_need_no_gitignored_cache(pool, tmp_path):
+    ranked(pool, tmp_path)
+    assert "judge_vs_judge" not in dp.score(tmp_path)  # Exp 36's record keeps its shape
+    res = dp.score(tmp_path, which="opus")
+    assert res["judge_vs_judge"] == dp.judge_vs_judge(dp.decided_pairs(pool, dp.read_state(tmp_path), tmp_path), tmp_path)
+
+
 def test_judge_vs_judge_counts_the_pairs_both_judges_answered_consistently_and_ignores_teach_pairs(tmp_path):
     pairs = fake_pairs()
     dp.judge_all(FakeJudge(right=22, consistent=30), pairs, tmp_path, out=lambda *_: None, which="opus")

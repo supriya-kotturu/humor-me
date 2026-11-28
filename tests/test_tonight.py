@@ -791,7 +791,7 @@ def test_the_place_lists_leave_out_every_first_name_and_a_word_the_safety_rules_
 
 
 def test_rules_version_is_v3():
-    assert safety.RULES_VERSION == "rules-v3"
+    assert safety.RULES_VERSION == "rules-v4"
 
 
 def test_the_prompt_allows_places_and_orgs_asks_for_the_so_what_and_still_bans_people():

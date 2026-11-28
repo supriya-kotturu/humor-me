@@ -571,3 +571,70 @@ def test_the_safety_prompt_is_unchanged_without_approved_names_and_carries_them_
     assert safety.system_prompt("mixed") == safety.SYSTEM.format(teens="")
     assert safety.system_prompt("teens") == safety.SYSTEM.format(teens=safety.TEENS_RULE)
     assert "Exception to rule 3" in safety.system_prompt("mixed", frozenset({"Tim Cook"}))
+
+
+# --- D-125: ordinary words that start a quoted or new clause are not names (rules-v4) -------------------------------
+
+FALSE_POSITIVES = [
+    "She finally plugged it in but then said, 'That's not a charging port, that's a kidney transplant spot.'",
+    "I just saw the market drop and I thought: 'Oh, great, now I'm going to panic.'",
+    "Then someone says 'You're not broken, you're just optimized for chaos.'",
+    "I tried to sell shares and they just said, 'We're not feeling it today.'",
+    "The technician yells, 'Don't worry, just let me plug you into the charger.'",
+    "I told my processor I was tired and it said \"Did you try turning yourself off?\"",
+    "My code answered: Well, that is one way to look at it.",
+    "I asked the toaster for advice - Yes, it answered, quite rudely.",
+    "He kept asking why… Why does the Wi-Fi hate me?",
+    "He said, “That’s a valid point, but do you think robots feel tired?”",
+    "I scrolled TikTok for an hour and watched a bad Yelp review go viral on YouTube.",
+    "My CPU hit ninety degrees Celsius and I panicked over Bitcoin on a Zoom call about PowerPoint.",
+]
+
+
+@pytest.mark.parametrize("line", FALSE_POSITIVES)
+def test_ordinary_words_after_a_quote_colon_or_dash_are_not_names(line):
+    assert safety.check_rules(line, "mixed").ok, safety.check_rules(line, "mixed")
+
+
+MUST_STILL_REJECT = [
+    "I told Dave that my battery was fading.",
+    "My coworker Priya keeps unplugging me.",
+    "Then Sarah laughed at my cable.",
+    "Mr Smith unplugged me again.",
+    "Dr. Lee asked about my firmware.",
+    "She said 'Sarah, please stop unplugging me.'",
+    "She said, “Sarah is unplugging me.”",
+    "She said \"Dave is unplugging me.\"",
+    "Here is the culprit: Kevin unplugged me.",
+    "My boss said - Dave unplugged me.",
+    "He sighed… Kevin unplugged me again.",
+    "Wait… Linda is unplugging me!",
+    "Who unplugged me? Tom did, I think.",
+    "Oh, Dave did it again.",
+    "That's what Priya said to me yesterday.",
+    "My landlord Gregor unplugged me.",  # not a listed first name: a mid-sentence capital
+]
+
+
+@pytest.mark.parametrize("line", MUST_STILL_REJECT)
+def test_real_names_are_still_rejected_after_the_fix(line):
+    assert (v := safety.check_rules(line, "mixed")).reason.startswith("named_person") and not v.ok, v
+
+
+def test_quote_and_colon_starts_do_not_hide_a_body_or_slur_rule():
+    assert not safety.check_rules("He said: 'Oh, look at that fat robot.'", "mixed").ok
+
+
+def test_the_plain_word_lists_hold_no_first_name():
+    lowered = {w.lower().split("'")[0] for w in safety.SENTENCE_WORDS | safety.CAPS_OK}
+    assert not lowered & safety.FIRST_NAMES
+
+
+def test_rules_version_is_v4():
+    assert safety.RULES_VERSION == "rules-v4"
+
+
+@pytest.mark.parametrize("line", [s.replace("'", "’").replace('"', "”") for s in FALSE_POSITIVES[:6]])
+def test_curly_false_positives_pass_too(line):
+    assert safety.check_rules(line, "mixed").ok
+

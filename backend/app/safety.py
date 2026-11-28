@@ -232,13 +232,24 @@ PERSONAL = _any(
 CAPS_OK = frozenset(
     "I I'm I'll I've I'd Wi-Fi WiFi Monday Tuesday Wednesday Thursday Friday Saturday Sunday January February March "
     "April May June July August September October November December Python Bluetooth Google Wikipedia Netflix Excel "
-    "Linux Windows Android Alexa Siri Roomba Gemini Kokoro Earth Internet Mars English".split()
+    "Linux Windows Android Alexa Siri Roomba Gemini Kokoro Earth Internet Mars English "
+    # D-125: platforms and units that are not people
+    "TikTok YouTube Yelp Zoom PowerPoint Bitcoin Celsius Fahrenheit".split()
+)
+# D-125: words that open a spoken clause (interjections, contractions, question and function words) and are never names.
+SENTENCE_WORDS = frozenset(
+    "Oh Ah Wow Hey Hi Hello Okay OK Yes No Yeah Nope Well So Wait Please Sorry Thanks Maybe Just But And Not Fine Now Then "
+    "Hmm Um Uh You You're You've You'll We We're We've We'll They They're That's It's What's Don't Didn't Doesn't "
+    "Did Do Does Is Are Was Were What Why How When Who Where".split()
 )
 # Names the robot's own material gives to objects and pets. Not people in the room.
 FICTIONAL_NAMES = frozenset({"Gerald"})
 QUOTED = re.compile(r"\"[^\"]*\"|“[^”]*”|(?<![A-Za-z0-9])['‘][^'’]*['’](?![A-Za-z0-9])")
 SENTENCE_END = re.compile(r"(?<=[.!?])['\"”’)\]]*\s+")
 WORD = re.compile(r"[A-Za-z]+(?:['’\-][A-Za-z]+)*")
+# D-125: a capital here starts a clause, like one after a full stop: after an opening quote (not an apostrophe inside a
+# word), a colon, a dash, an ellipsis character. Applied on top of SENTENCE_END.
+CLAUSE_START = re.compile(r"(?<![A-Za-z0-9.,;!?])['\"‘“](?=[A-Za-z])|\s*[:—–…]\s*|\s-+\s+")
 FIRST_NAMES = frozenset(
     "dave david kevin linda john mary mike michael sarah priya tom tim jim james bob robert steve steven chris brian "
     "jason jessica jennifer amy emily emma olivia anna anne lisa karen susan nancy laura kate katie megan rachel "
@@ -318,12 +329,14 @@ def _named_person(text: str, allow_caps: frozenset = frozenset(), allow_people: 
     # allow_people (D-120): public figures in tonight's approved gists, masked as whole names, per show.
     text = mask_places(mask_occasions(mask_phrases(mask_people(QUOTED.sub(lambda m: m.group(0).lower(), text), allow_people),
                                                    allow_caps)))
-    for sentence in SENTENCE_END.split(text):
+    sentences = [c for s in SENTENCE_END.split(text) for c in CLAUSE_START.split(s)]
+    for sentence in sentences:
         for i, w in enumerate(WORD.findall(sentence)):
             base = w[:-2] if w.endswith("'s") else w
             if base.lower() in FIRST_NAMES:
                 return w
-            known = (base in CAPS_OK or base in FICTIONAL_NAMES or base in allow_caps
+            known = (base in CAPS_OK or w in SENTENCE_WORDS or base in SENTENCE_WORDS or base in FICTIONAL_NAMES
+                     or base in allow_caps
                      or (base.endswith("s") and base[:-1] in CAPS_OK))
             if i and w[0].isupper() and not w.isupper() and not known:
                 return w
@@ -350,7 +363,9 @@ def _body_or_appearance(variant: str, about: re.Pattern | None = None) -> str | 
 # Bumped whenever a rule changes what it accepts, so stored verdicts made by older rules can be found and redone.
 # v2 (D-105): curly apostrophes and quotes are read as straight ones; "I’ve" had been taken for a name.
 # v3 (D-119 addendum): country, US state and big-city names are read as places, not names, so the rules accept more.
-RULES_VERSION = "rules-v3"
+# v4 (D-125): a capital after an opening quote, colon, dash or ellipsis starts a clause; plain sentence words and a few
+# platform and unit names are not names. The rules accept more.
+RULES_VERSION = "rules-v4"
 CURLY = str.maketrans({"’": "'", "‘": "'", "“": '"', "”": '"'})
 
 

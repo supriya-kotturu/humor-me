@@ -29,7 +29,7 @@ declare -A STATUS
 for s in "${STAGES[@]}"; do STATUS[$s]=skipped; done
 summary() {
     echo "==== smoke summary (DTYPE=${DTYPE:-fp16})"
-    for s in "${STAGES[@]}"; do printf '[summary] %-13s %s\n' "$s" "${STATUS[$s]}"; done
+    for s in "${STAGES[@]}"; do echo "[summary] $(printf '%-13s' "$s") ${STATUS[$s]}"; done
 }
 trap summary EXIT
 stage() {  # stage <name> <command...>: runs it, records ok or failed, and stops the job on a failure

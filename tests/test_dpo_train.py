@@ -402,6 +402,7 @@ def test_the_modelfile_keeps_the_template_and_parameters_and_swaps_the_weights()
 
 
 def test_the_command_line_writes_a_modelfile_and_prints_the_power_table(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("JOKE_WRITER_PROVIDER", raising=False)  # main() sets it on os.environ; monkeypatch undoes that after the test
     base = tmp_path / "Modelfile.base"
     base.write_text(BASE_MODELFILE, encoding="utf-8")
     monkeypatch.setattr(sys, "argv", ["dpo_pairs", "modelfile", "--base", str(base), "--gguf", "x/humor-qwen3-C-Q4_K_M.gguf", "--out", str(tmp_path / "Modelfile.C")])

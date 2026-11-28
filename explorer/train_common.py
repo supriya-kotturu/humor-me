@@ -1,4 +1,6 @@
 """Shared by train_sft.py and train_dpo.py: data, model, LoRA, the stop-on-NaN and time-limit callbacks, version printing."""
+from __future__ import annotations
+
 import dataclasses
 import json
 import math

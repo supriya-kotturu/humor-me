@@ -13,6 +13,8 @@ shares the one GPU and the show's 12 s bit deadline would suffer):
     python -m sim.dpo_pairs rank [--limit 20]                 # you pick the funnier thread of a pair, in sittings
     python -m sim.dpo_pairs judge --env-file backend/.env     # the gate: 120 calls (60 test pairs, both orders)
     python -m sim.dpo_pairs score --record                    # numbers -> reports/metrics/dpo_judge_gate.json
+    python -m sim.dpo_pairs judge --model opus --env-file backend/.env   # D-122, Exp 37: same pairs, Opus 5.5, own cache
+    python -m sim.dpo_pairs score --model opus --record       # -> reports/metrics/dpo_judge_gate_opus.json
     python -m sim.dpo_pairs pool --split train --rebuild      # later, with 3+ days stored, before any judge labelling
 
 Prompts. `pool` writes `data/dpo/pool.json` once (gitignored, it holds headline gists): a seeded pool of bit requests built the
@@ -66,6 +68,13 @@ NAME = "dpo_judge_gate"
 SEED = "dpo-pool-v1"
 RANK_SEED = "dpo-rank-v1"
 RERANK_SEED = "dpo-rerank-v1"
+OPUS_MODEL = "claude-opus-5-5"
+# D-122: the second look at the same 60 test pairs. Two looks, so the bar is Bonferroni-corrected: 97.5% instead of
+# 95% (z = NormalDist().inv_cdf(0.9875), pinned so the record's key is stable). Judgment call on the correction method.
+Z = {"haiku": 1.96, "opus": 2.2414}
+LEVEL = {"haiku": "95", "opus": "975"}
+RECORD = {"haiku": "dpo_judge_gate", "opus": "dpo_judge_gate_opus"}
+OPUS_TIMING = (90.0, 240.0)  # adaptive thinking is slower than the safety check's 12 s / 25 s; not a quality setting
 RERANK_PER_CELL = 5  # 20 pairs, 10 teach and 10 test: the user's choice (2026-11-26); reported only, no bar
 RANKING_N = 240  # 120 decided pairs plus room for ties, skips and bits with fewer than 2 clean threads: judgment call, not measured
 TRAIN_N = 800  # judgment call, not measured; bounded by the free (mode, room) combinations of a first bit, see build_pool
@@ -97,6 +106,11 @@ One person's taste decides which is funnier. Below are {n} pairs they ranked, wi
 Reply with JSON only: {{"funnier": "A"}} or {{"funnier": "B"}}."""
 JUDGE_SCHEMA = {"type": "object", "additionalProperties": False, "required": ["funnier"],
                 "properties": {"funnier": {"type": "string", "enum": ["A", "B"]}}}
+
+
+def stamp() -> str:
+    """When an answer was given (UTC): the ranking took far longer than planned and nothing recorded by how much."""
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
 
 
 def _write(path: pathlib.Path, rec: dict) -> None:
@@ -586,7 +600,7 @@ def rank(pool: dict, root: pathlib.Path | None = None, limit: int | None = None,
                 break
         if a == "q":
             break
-        state["answers"][p["id"]] = {"choice": a, "left": left, "right": right}
+        state["answers"][p["id"]] = {"choice": a, "left": left, "right": right, "at": stamp()}
         _write(rank_path(root), state)
         asked += 1
     out(counts_line(state, pool) + ".")
@@ -649,7 +663,7 @@ def rerank(pool: dict, root: pathlib.Path | None = None, limit: int | None = Non
                 break
         if a == "q":
             break
-        mine["answers"][pid] = {"choice": a, "left": left, "right": right}
+        mine["answers"][pid] = {"choice": a, "left": left, "right": right, "at": stamp()}
         _write(rerank_path(root), mine)
         asked += 1
     out(f"{len(mine['answers'])} of {len(picks)} re-ranked.")
@@ -727,21 +741,35 @@ def parse_pick(reply: str) -> str:
     return v
 
 
-def judge_digest(system: str) -> str:
-    provider, model, thinking = tc.judge_model()
+def judge_model(which: str = "haiku") -> tuple[str, str, bool]:
+    """(provider, model, thinking). Opus 5.5 cannot run with thinking off, so its thinking is on at effort low."""
+    return tc.judge_model() if which == "haiku" else ("anthropic", OPUS_MODEL, True)
+
+
+def make_judge_client(which: str = "haiku"):
+    if which == "haiku":
+        return tc.make_judge_client()
+    # Same prompt, schema, effort and retries as the Haiku run; only the model, the timeouts and prompt caching differ.
+    provider, model, thinking = judge_model(which)
+    return llm.from_env(OPUS_TIMING[0], role="safety_check", provider=provider, model=model, retries=generate.FILTER_RETRIES,
+                        deadline_s=OPUS_TIMING[1], thinking=thinking, cache_system=True)
+
+
+def judge_digest(system: str, which: str = "haiku") -> str:
+    provider, model, thinking = judge_model(which)
     body = "\x00".join([system, JUDGE_SCHEMA and json.dumps(JUDGE_SCHEMA, sort_keys=True), provider, model, str(thinking)])
     return hashlib.sha256(body.encode()).hexdigest()[:8]
 
 
-def judge_dir(root: pathlib.Path, system: str) -> pathlib.Path:
-    return root / "judge" / judge_digest(system)
+def judge_dir(root: pathlib.Path, system: str, which: str = "haiku") -> pathlib.Path:
+    return root / "judge" / judge_digest(system, which)
 
 
-def judge_all(client, pairs: list[dict], root: pathlib.Path | None = None, out=print) -> int:
+def judge_all(client, pairs: list[dict], root: pathlib.Path | None = None, out=print, which: str = "haiku") -> int:
     """Asks the judge about every test pair in both orders, cached per call and resumable. Returns calls made."""
     root = root or DATA
     system = teach_prompt(pairs)
-    directory, made = judge_dir(root, system), 0
+    directory, made = judge_dir(root, system, which), 0
     for pair in (p for p in pairs if p["role"] == "test"):
         for order in ORDERS:
             path = directory / f"{pair['id']}-{order}.json"
@@ -764,13 +792,14 @@ def picked_thread(letter: str | None, order: str) -> int | None:
     return (0 if letter == "A" else 1) if order == "ab" else (1 if letter == "A" else 0)
 
 
-def read_letters(pairs: list[dict], root: pathlib.Path | None = None) -> dict[tuple[str, str], str | None]:
-    directory = judge_dir(root or DATA, teach_prompt(pairs))
+def read_letters(pairs: list[dict], root: pathlib.Path | None = None, which: str = "haiku") -> dict[tuple[str, str], str | None]:
+    directory = judge_dir(root or DATA, teach_prompt(pairs), which)
     return {(p["id"], o): (_read(directory / f"{p['id']}-{o}.json") or {}).get("funnier")
             for p in pairs if p["role"] == "test" for o in ORDERS}
 
 
-def summarize(pairs: list[dict], letters: dict[tuple[str, str], str | None], ties: int = 0, skips: int = 0) -> dict:
+def summarize(pairs: list[dict], letters: dict[tuple[str, str], str | None], ties: int = 0, skips: int = 0,
+              which: str = "haiku") -> dict:
     test = [p for p in pairs if p["role"] == "test"]
     rows = []
     for p in test:
@@ -781,7 +810,8 @@ def summarize(pairs: list[dict], letters: dict[tuple[str, str], str | None], tie
                      "order_agree": [pk == p["winner"] for pk in picks if pk is not None]})
     n, agree = len(rows), sum(r["agree"] for r in rows)
     missing = sum(not r["complete"] for r in rows)
-    w = jc.wilson(agree, n)
+    z, lv = Z[which], LEVEL[which]
+    w = jc.wilson(agree, n, z)
 
     def by(half: str) -> dict:
         mine = [r for r in rows if r["half"] == half]
@@ -792,25 +822,26 @@ def summarize(pairs: list[dict], letters: dict[tuple[str, str], str | None], tie
     singles = [x for r in rows for x in r["order_agree"]]
     cons = [r for r in rows if r["complete"] and not r["flip"]]
     c, a_ = len(cons), sum(r["agree"] for r in cons)
-    wc = jc.wilson(a_, c)
+    wc = jc.wilson(a_, c, z)
     if n != N_TEST or missing:
         verdict = "incomplete"
     else:
-        verdict = "pass" if passes(a_, c) else "fail"
+        verdict = "pass" if passes(a_, c, z) else "fail"
     return {"verdict": verdict, "n_test": n, "consistent": c, "agree_consistent": a_, "min_consistent": MIN_CONSISTENT,
-            "wilson95": wc and [round(x, 4) for x in wc],
-            "agree": agree, "wilson95_strict": w and [round(x, 4) for x in w],
+            f"wilson{lv}": wc and [round(x, 4) for x in wc],
+            "agree": agree, f"wilson{lv}_strict": w and [round(x, 4) for x in w],
             "missing_pairs": missing, "flip_rate": rate(sum(r["flip"] for r in rows), n - missing),
             # beside the bar, never deciding: D-95's convention (a judge tie earns half), the strict count above, one order
             "agree_flip_half_credit": rate(2 * agree + sum(r["flip"] for r in rows), 2 * n),
             "agree_single_order": rate(sum(singles), len(singles)),
             "by_half": {h: by(h) for h in HALVES}, "ties": ties, "skips": skips,
-            "judge": {"provider": tc.judge_model()[0], "model": tc.judge_model()[1], "teach_pairs": sum(p["role"] == "teach" for p in pairs)}}
+            "judge": {"provider": judge_model(which)[0], "model": judge_model(which)[1], "teach_pairs": sum(p["role"] == "teach" for p in pairs)}}
 
 
-def passes(a: int, c: int) -> bool:
-    """D-121's gate: enough pairs answered consistently, and among them the Wilson 95% lower bound of agreement above 50%."""
-    return c >= MIN_CONSISTENT and jc.wilson(a, c)[0] > 0.5
+def passes(a: int, c: int, z: float = Z["haiku"]) -> bool:
+    """D-121's gate: enough pairs answered consistently, and among them the Wilson lower bound of agreement above 50%
+    (95% for the first look, 97.5% for D-122's second look: pass `Z["opus"]`)."""
+    return c >= MIN_CONSISTENT and jc.wilson(a, c, z)[0] > 0.5
 
 
 def rate(k: int, n: int) -> float | None:
@@ -833,19 +864,20 @@ def answers_digest(state: dict) -> str:
     return hashlib.sha256(json.dumps(state["answers"], sort_keys=True).encode()).hexdigest()[:8]
 
 
-def params(pool: dict, state: dict, pairs: list[dict], root: pathlib.Path | None = None) -> dict:
+def params(pool: dict, state: dict, pairs: list[dict], root: pathlib.Path | None = None, which: str = "haiku") -> dict:
     """The record's key: the pool, every answer (the test answers are not in the teach prompt), the teach prompt and the bar,
     plus the re-rank answers when present so the record reflects them (the gate verdict never depends on them)."""
-    return {"pool_digest": pool["digest"], "rank_seed": RANK_SEED, "answers_digest": answers_digest(state),
-            "judge_digest_": judge_digest(teach_prompt(pairs)), "min_consistent": MIN_CONSISTENT,
-            "rerank_digest": rerank_digest(read_rerank(root or DATA))}
+    key = {"pool_digest": pool["digest"], "rank_seed": RANK_SEED, "answers_digest": answers_digest(state),
+           "judge_digest_": judge_digest(teach_prompt(pairs), which), "min_consistent": MIN_CONSISTENT,
+           "rerank_digest": rerank_digest(read_rerank(root or DATA))}
+    return key if which == "haiku" else {**key, "model": judge_model(which)[1], "z": Z[which]}
 
 
-def score(root: pathlib.Path | None = None) -> dict:
+def score(root: pathlib.Path | None = None, which: str = "haiku") -> dict:
     pool, state, pairs = need_pairs(root)
     ans = state["answers"].values()
-    letters = read_letters(pairs, root)
-    res = summarize(pairs, letters, sum(a["choice"] == "t" for a in ans), sum(a["choice"] == "s" for a in ans))
+    letters = read_letters(pairs, root, which)
+    res = summarize(pairs, letters, sum(a["choice"] == "t" for a in ans), sum(a["choice"] == "s" for a in ans), which)
     res["self_agreement"] = self_agreement(pool, state, read_rerank(root or DATA), pairs, letters)
     return res
 
@@ -857,18 +889,25 @@ def run(pool_digest: str = "", rank_seed: str = "", answers_digest: str = "", ju
     return score()
 
 
-def stored() -> dict | None:
+def run_opus(pool_digest: str = "", rank_seed: str = "", answers_digest: str = "", judge_digest_: str = "",
+             min_consistent: int = 0, rerank_digest: str = "", model: str = "", z: float = 0.0) -> dict:
+    """Exp 37's record (D-122): the same numbers for the Opus 5.5 judge on the same pairs, under the corrected bar."""
+    return score(which="opus")
+
+
+def stored(which: str = "haiku") -> dict | None:
     """The committed record (numbers only), for the notebook; None until `score --record` has run."""
-    path = cache.METRICS / f"{NAME}.json"
+    path = cache.METRICS / f"{RECORD[which]}.json"
     return json.loads(path.read_text())["results"] if path.exists() else None
 
 
-def table(res: dict) -> str:
-    w = res["wilson95"]
+def table(res: dict, which: str = "haiku") -> str:
+    w = res[f"wilson{LEVEL[which]}"]
+    chance = "95%" if which == "haiku" else "97.5%"
     rows = ["| Check | Result | Bar |", "|---|---|---|",
             f"| Test pairs the judge answered the same way in both orders (c) | {res['consistent']} of {res['n_test']} | at least {res['min_consistent']} |",
             f"| Of those, the judge picks your thread (a) | {res['agree_consistent']} of {res['consistent']} | lower end of the range above 50% |",
-            f"| Likely range of a / c (Wilson 95%) | {'n/a' if w is None else f'{w[0]:.0%} to {w[1]:.0%}'} | lower end above 50% |",
+            f"| Likely range of a / c (Wilson {chance}) | {'n/a' if w is None else f'{w[0]:.0%} to {w[1]:.0%}'} | lower end above 50% |",
             f"| Pairs where the two orders disagree | {res['flip_rate']} | beside the bar |"]
     for h, v in res["by_half"].items():
         rows.append(f"| {h} half: consistent, agreeing | {v['consistent']} of {v['pairs']}, {v['agree']} | beside the bar |")
@@ -900,7 +939,9 @@ def main() -> None:
     ap.add_argument("--limit", type=int, help="rank, rerank: ask at most this many questions this sitting")
     ap.add_argument("--rebuild", action="store_true", help="pool: replace the frozen pool (invalidates every written bit)")
     ap.add_argument("--tonight-dir", help="pool: where the stored `sim.tonight fetch` folders are (default data/tonight)")
-    ap.add_argument("--record", action="store_true", help="score: save the result as the Exp 36 record")
+    ap.add_argument("--record", action="store_true", help="score: save the result as the Exp 36 record (Exp 37 with --model opus)")
+    ap.add_argument("--model", choices=("haiku", "opus"), default="haiku",
+                    help="judge, score: the judge model; haiku (Exp 36, D-121) is the default, opus is Exp 37 (D-122)")
     ap.add_argument("--env-file")
     a = ap.parse_args()
     if a.env_file:
@@ -960,13 +1001,17 @@ def main() -> None:
         return
     pool, state, pairs = need_pairs()
     if a.command == "judge":
-        n = judge_all(tc.make_judge_client(), pairs)
-        print(f"{n} calls made; now `score --record`")
+        client = make_judge_client(a.model)
+        n = judge_all(client, pairs, which=a.model)
+        print(f"{n} calls made; tokens in {client.input_tokens}, out {client.output_tokens}, "
+              f"cache read {getattr(client, 'cache_read_tokens', 0)}, cache write {getattr(client, 'cache_write_tokens', 0)}")
+        print(f"now `score{'' if a.model == 'haiku' else ' --model ' + a.model} --record`")
         return
-    res = score()
+    res = score(which=a.model)
     if a.record:
-        res = cache.run_or_load(NAME, run, rerun=True, **params(pool, state, pairs))
-    print(table(res), flush=True)
+        fn = run if a.model == "haiku" else run_opus
+        res = cache.run_or_load(RECORD[a.model], fn, rerun=True, **params(pool, state, pairs, which=a.model))
+    print(table(res, a.model), flush=True)
 
 
 if __name__ == "__main__":

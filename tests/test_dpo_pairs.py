@@ -921,3 +921,69 @@ def test_the_gate_verdict_and_its_numbers_do_not_depend_on_the_rerank(pool, tmp_
     assert p1["rerank_digest"] != "" and {k: v for k, v in p1.items() if k != "rerank_digest"} == {k: v for k, v in p0.items() if k != "rerank_digest"}
     assert set(p1) == set(dp.run.__code__.co_varnames[:dp.run.__code__.co_argcount])
     assert "Your agreement with yourself (20 of 20 re-ranked)" in dp.table(with_)
+
+
+# --- D-122 / Exp 37: the same pairs, Opus 5.5, a corrected bar for the second look ---------------------------------------
+
+def test_the_corrected_bar_needs_one_or_two_more_agreeing_pairs_than_the_first():
+    first = {c: next(a for a in range(c + 1) if jc.wilson(a, c, dp.Z["haiku"])[0] > 0.5) for c in (30, 46, 60)}
+    second = {c: next(a for a in range(c + 1) if jc.wilson(a, c, dp.Z["opus"])[0] > 0.5) for c in (30, 46, 60)}
+    assert first == {30: 21, 46: 30, 60: 38} and second == {30: 22, 46: 31, 60: 39}
+    assert all(dp.passes(second[c], c, dp.Z["opus"]) and not dp.passes(second[c] - 1, c, dp.Z["opus"]) for c in second)
+    assert dp.passes(30, 46) and not dp.passes(30, 46, dp.Z["opus"])  # 30 of 46 clears the first bar, not the second
+    assert not dp.passes(24, 46) and not dp.passes(29, 29, dp.Z["opus"])
+    # z is the 97.5% two-sided Bonferroni value for two looks
+    from statistics import NormalDist
+    assert round(NormalDist().inv_cdf(1 - 0.05 / 4), 4) == dp.Z["opus"]
+
+
+def test_the_chance_of_passing_the_corrected_bar_is_the_computed_one():
+    from math import comb
+
+    def chance(p, z):
+        q, r = p * p + (1 - p) ** 2, p * p / (p * p + (1 - p) ** 2)
+        total = 0.0
+        for c in range(30, 61):
+            amin = next((a for a in range(c + 1) if jc.wilson(a, c, z)[0] > 0.5), None)
+            if amin is not None:
+                total += comb(60, c) * q ** c * (1 - q) ** (60 - c) * sum(comb(c, a) * r ** a * (1 - r) ** (c - a) for a in range(amin, c + 1))
+        return total
+
+    assert [round(chance(p, dp.Z["haiku"]), 3) for p in (.5, .65, .7, .75)] == [0.014, 0.738, 0.912, 0.982]
+    assert [round(chance(p, dp.Z["opus"]), 3) for p in (.5, .65, .7, .75)] == [0.007, 0.695, 0.907, 0.982]
+
+
+def test_opus_has_its_own_cache_record_and_key_and_haiku_keeps_its_own(tmp_path):
+    pairs = fake_pairs()
+    system = dp.teach_prompt(pairs)
+    assert dp.judge_dir(tmp_path, system) != dp.judge_dir(tmp_path, system, "opus")
+    assert dp.judge_model("opus") == ("anthropic", "claude-opus-5-5", True) and dp.judge_model()[1] == "claude-haiku-5-5"
+    assert dp.RECORD == {"haiku": "dpo_judge_gate", "opus": "dpo_judge_gate_opus"}
+    pool = {"digest": "p"}
+    state = {"answers": {}}
+    haiku, opus = dp.params(pool, state, pairs, tmp_path), dp.params(pool, state, pairs, tmp_path, which="opus")
+    assert "model" not in haiku and "z" not in haiku  # Exp 36's key is unchanged
+    assert opus["model"] == "claude-opus-5-5" and opus["z"] == dp.Z["opus"] and opus["judge_digest_"] != haiku["judge_digest_"]
+    assert set(opus) == set(dp.run_opus.__code__.co_varnames[:dp.run_opus.__code__.co_argcount])
+
+
+def test_the_opus_judge_is_scored_from_its_own_replies_with_the_corrected_range(tmp_path):
+    pairs = fake_pairs()
+    judge = FakeJudge(right=22, consistent=30)
+    dp.judge_all(judge, pairs, tmp_path, out=lambda *_: None, which="opus")
+    assert dp.read_letters(pairs, tmp_path)[("test00", "ab")] is None  # the Haiku cache is untouched
+    res = dp.summarize(pairs, dp.read_letters(pairs, tmp_path, "opus"), which="opus")
+    assert (res["consistent"], res["agree_consistent"], res["verdict"]) == (30, 22, "pass") and "wilson975" in res
+    assert res["judge"]["model"] == "claude-opus-5-5" and "wilson95" not in res
+    low = dp.summarize(pairs, dp.read_letters(pairs, tmp_path), which="haiku")
+    assert low["verdict"] == "incomplete"  # nothing under Haiku's cache: the two judges never mix
+    assert "97.5%" in dp.table(res, "opus")
+
+
+def test_a_new_rank_or_rerank_answer_carries_a_utc_time_and_old_answers_still_score(pool, tmp_path):
+    state = ranked(pool, tmp_path)
+    assert all(a["at"].endswith("+00:00") for a in state["answers"].values())
+    dp.rerank(pool, tmp_path, limit=2, read=scripted("1", "2"), out=lambda *_: None)
+    assert all(a["at"].endswith("+00:00") for a in dp.read_rerank(tmp_path)["answers"].values())
+    old = {pid: {k: v for k, v in a.items() if k != "at"} for pid, a in state["answers"].items()}
+    assert len(dp.decided({"answers": old}, pool)) and sum(dp.decided({"answers": old}, pool).values()) == 120

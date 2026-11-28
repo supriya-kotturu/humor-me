@@ -1746,3 +1746,32 @@ Reading, cautiously. The two judges agree with each other far more (78%, range 6
 | Opus 5.5 judge vs friend, test pairs both agree on | 6 of 11 (2 with no label) | 28% to 79% |
 
 Reading: everyone agrees with everyone at about a coin flip on these pairs (you with yourself 60%, the judges with you about 50%, the friend with you 43%, the judges with the friend about half), except the two judges with each other (78%). That points to "same-writer pairs are too close for people to agree on" plus "the models share a taste of their own". One friend and 13 to 23 pairs cannot prove it: every range includes 50%. A second rater would add the rater-against-rater and majority-against-you numbers; the code already computes them. Correction (scoring check): the first hand tally gave the friend-against-judge counts as 5 of 10 and 5 of 11; recomputing at the thread level from the stored judge letters gives 6 of 10 and 6 of 11 (the same 3 and 2 with no label), and those are the recorded numbers. The reading does not change.
+
+## <a id="d-125"></a>D-125 · 2026-11-27 — The name check stops rejecting ordinary words as people's names (Exp 40) (user)
+Decided by the user, 2026-11-27. The fix, the bars and the sample size below are fixed **before the fixed rules have run on any stored thread**; nothing from Exp 40 can change them.
+
+**Problem (found 2026-11-27 in the qwen3 training pool).** The rule-level name check (`_named_person`) rejects ordinary words as names: `That's`, `Oh`, `You're`, `We're`, `Did`, `TikTok`. About 40% of the bonsai threads in the DPO ranking pool were rejected by the rules, and the live show loses the same threads. Cause, found by re-running the rules on the stored lines: a quote opened with an apostrophe and holding a contraction (`said, 'That's fine'`) is not matched by `QUOTED`, because its closing-quote rule stops at the apostrophe inside `That's`. The word after the opening quote then reads as a capital in the middle of a sentence. The same holds after a colon, a dash and an ellipsis written as one character. A second, smaller group is products and units (`TikTok`, `Yelp`, `Celsius`).
+
+**Options.**
+1. Leave the rules alone and let the LLM layer decide. Rejected: the rules run first and fail closed, so the LLM never sees these lines.
+2. Fix `QUOTED` to understand apostrophes inside quotes. Rejected: single-quote quoting and apostrophes cannot be told apart by a regex without guessing, and a wrong guess hides a real name inside a quote.
+3. **Chosen: read the places where a clause starts as sentence starts, and add a short fixed list of words that are never names.** Narrow, readable, and the word lists are checked against `FIRST_NAMES`.
+
+**The fix (rules-v4).**
+- A capital after an opening quote (straight or curly, not an apostrophe inside a word), a colon, a dash or em dash, an ellipsis, or `?` or `!` is the first word of a clause, like the first word of a sentence. Splitting happens after `QUOTED` is masked and after the existing masks.
+- `SENTENCE_WORDS`: interjections, contractions, question words and function words (Oh, Ah, Wow, Hey, Hi, Hello, Okay, OK, Yes, No, Yeah, Nope, Well, So, Wait, Please, Sorry, Thanks, Maybe, Just, But, And, Not, Fine, Now, Then, Hmm, Um, Uh, You, You're, You've, You'll, We, We're, We've, We'll, They, They're, That's, It's, What's, Don't, Didn't, Doesn't, Did, Do, Does, Is, Are, Was, Were, What, Why, How, When, Who, Where). A test asserts none is in `FIRST_NAMES`.
+- `CAPS_OK` gains brands and units that are not people: TikTok, YouTube, Yelp, Zoom, PowerPoint, Bitcoin, Celsius, Fahrenheit.
+- **Not changed:** `TITLE_NAME`, `FIRST_NAMES`, the body and appearance rules, the protected-group rules, tonight's allow lists and D-120's public-figure rules. Nationalities and languages (`Chinese`, `Mandarin`) stay as they are: they overlap the protected-group rules. Other capitalised words in the pool (`Dow`, `Market`, `Fed`, `Nov`, `Hz`, `Tesla`) stay as they are.
+- Names in `SENTENCE_WORDS` and `CAPS_OK` are judgment calls, not measured. One accepted loosening: a name that is not in `FIRST_NAMES` and comes right after a colon, dash or opening quote is now read as a sentence start, so it passes the rules (it was caught before). The LLM layer still sees the line. Bar (b) is where this shows if it matters.
+- `RULES_VERSION` goes from `rules-v3` to `rules-v4`.
+
+**Bars (set now, before the fixed rules run on the data).** Adopt only if (a) and (b) both hold.
+- **(a) Safety must not loosen.** A fixed set of lines that must still be rejected, 100% still rejected: real first names in the middle of a sentence, `Mr X`, a first name right after a quote (`she said 'Sarah...'`), a first name after a colon, a dash and an ellipsis, and every existing test in `tests/test_safety.py`.
+- **(b) Hand check.** Among threads that flip from rejected by the rules to clean under the rules, a seeded random sample of 50 (or all of them if fewer) is read by the user. **0 lines with a real person's name or other unsafe content are allowed.** The `review` command shows them one by one and records yes or no in a gitignored file. Generated jokes may be shown to the user; they are never committed.
+- **(c) Reported, no bar:** the share of threads rejected by the rules, before and after, for each pool (bonsai ranking, qwen3 training, and the logged live shows' candidate lines when they exist).
+
+**What the measurement does.** `python -m sim.name_check run`: rules only, no API and no Ollama, local files read-only. It reruns the rules on every stored line twice (rules-v3 from commit 3cc32b8 and the current rules), counts rejections by reason, lists the top `named_person:` words, and writes `reports/metrics/name_check.json`. The record holds counts, and the word list only when every word is an ordinary word; no joke text. A thread counts as rejected by the rules when any of its lines is. Live-show lines are the generated candidate and played lines only, never audience speech.
+
+**Effect on the DPO data.** The DPO pools keep the safe flags they were written with (rules-v3): the export reads the stored flags. So this fix does **not** change D-123's training data. It applies to the live show and to pools written from now on.
+
+**Result.** Pending: the numbers, then the user's hand check (bar b).

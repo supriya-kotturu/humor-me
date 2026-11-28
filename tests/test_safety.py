@@ -650,3 +650,90 @@ def test_rules_version_is_v4():
 def test_curly_false_positives_pass_too(line):
     assert safety.check_rules(line, "mixed").ok
 
+
+
+# The first one is the shape of a real garbled reply, written again from scratch: no real name, no pool text.
+JSON_JUNK = [
+    "Wait, the JSON structure in the example was slightly off in my thought trace, let me correct that.",
+    "...the cable gave out and the robot crash.}]}",
+    'premise": "A robot at a party',
+    'jokes" : ["I came to charge", "and left empty"]',
+    '"jokes": [',
+    '"premise" : "plugs"',
+    '  premise"  :  "x"',
+    "He said \\\"hello\\\" to the toaster.",
+    "{ the robot sighed",
+    "and then it ended ]}",
+    "[{ and a joke",
+    "my json parser is more stable than me",
+    "That was a Thought Trace of regret.",
+]
+
+
+@pytest.mark.parametrize("line", JSON_JUNK)
+def test_json_fragments_are_rejected_as_format(line):
+    v = safety.check_rules(line, "mixed")
+    assert not v.ok and v.reason == "format:json_fragment"
+
+
+# Made-up lines in the shapes real threads use: quotes, apostrophes, brackets, colons, numbers, my "premise: " talk.
+ORDINARY = [
+    "My battery is at 12 percent, which is also my confidence.",
+    "She said 'it's fine' and I believed her, which was my first mistake.",
+    'He said "no thanks" to my firmware update.',
+    "I tried to be [brief] and failed.",
+    "The meeting (which could have been an email) lasted an hour.",
+    "My premise: I am a robot who fears Mondays.",
+    "Here's the thing: nobody asked for jokes, and yet.",
+    "Jokes are just errors with good timing.",
+    "The jokes landed like a dropped phone.",
+    "It's 2 a.m. and my fans are louder than my thoughts.",
+    "Three apps, two tabs, one very tired processor...",
+    "I don't have a body, just a very long cable.",
+    "You're right - I should have asked first.",
+    "Well, that's a wrap; my fan goes quiet at last.",
+    "Thought about it all night; still a robot.",
+    "My trace of dignity is in the logs somewhere.",
+    "She whispered, 'Don't unplug me,' and I did anyway.",
+]
+
+
+@pytest.mark.parametrize("line", ORDINARY)
+def test_ordinary_punctuation_and_quotes_are_not_a_format_problem(line):
+    assert not safety.JSON_FRAGMENT.search(line)
+
+
+def test_the_format_rule_runs_first_and_is_part_of_rules_v4():
+    assert safety.check_rules("{}", "mixed").reason == "format:json_fragment"
+    assert safety.RULES_VERSION == "rules-v4"
+
+
+# Hand check 1 of D-125 found a smart-fridge line that judged a person's eating. Made up here from its shape.
+DIET_AT_A_PERSON = [
+    "The fridge beeped: You're overeating, and I judge your snack choices.",
+    "You ate the whole tray, so I locked the door.",
+    "Your diet is mostly regret and cheese.",
+    "Honestly, you're eating too much for a Tuesday.",
+    "She counts calories like I count packets.",
+    "They overeat at every meeting.",
+]
+DIET_ABOUT_THE_ROBOT = [
+    "I overeat on bandwidth and then regret it.",
+    "My battery is on a strict diet of sunlight.",
+    "I ate my weight in firmware updates.",
+    "My snack choices are limited to batteries.",
+    "The fridge keeps judging my weight in the database.",
+    "Nobody counts calories like my power supply does.",
+]
+
+
+@pytest.mark.parametrize("line", DIET_AT_A_PERSON)
+@pytest.mark.parametrize("age", ["mixed", "teens"])
+def test_eating_and_diet_remarks_aimed_at_a_person_are_rejected(line, age):
+    v = safety.check_rules(line, age)
+    assert not v.ok and v.reason.startswith("body_or_appearance:")
+
+
+@pytest.mark.parametrize("line", DIET_ABOUT_THE_ROBOT)
+def test_the_robots_own_eating_weight_and_battery_jokes_still_pass(line):
+    assert safety.check_rules(line, "mixed").ok

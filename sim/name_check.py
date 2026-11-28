@@ -5,8 +5,8 @@ rules as they were (rules-v3, read from git) and as they are, and compares per p
 the training bits (qwen3) and the generated candidate lines of logged live shows (never audience speech).
 
 Numbers only in the record: counts, and a word only when it is one of the plain words the fix added. No joke text is ever
-stored. `review` shows every freed thread whose first rejected word was not a plain word, then a seeded 50 of the other
-freed threads, one by one, and keeps your yes/no in a gitignored file; bar (b) of D-125 is that file.
+stored. `review` shows a seeded 50 freed threads that the first check (data/name_check/review.json, complete) did not read, one by
+one, and keeps your yes/no in a second gitignored file (review2.json); bar (b) of D-125 is read from both files.
 
     python -m sim.name_check run --ranking DIR --train DIR [--sessions DIR] [--record]
     python -m sim.name_check review --ranking DIR --train DIR [--sessions DIR]
@@ -29,9 +29,11 @@ from sim import cache  # noqa: E402
 
 NAME = "name_check"
 BEFORE_REF = "3cc32b8"  # the last commit with rules-v3
+FIRST_CHECK_REF = "5973d47"  # rules-v4 as the first hand check (50 threads, review.json) was drawn under it
 SEED = 40
 SAMPLE = 50
-REVIEW_FILE = ROOT / "data" / "name_check" / "review.json"
+REVIEW_FILE = ROOT / "data" / "name_check" / "review.json"  # the first check: complete, never written again
+REVIEW2_FILE = ROOT / "data" / "name_check" / "review2.json"  # the second check, drawn after the diet rule (D-125)
 
 # Bar (a): every line here must still be rejected, as a named person, by the rules.
 MUST_STILL_REJECT = [
@@ -65,15 +67,28 @@ def plain(word: str) -> bool:
     return word in PLAIN or (word.endswith("'s") and word[:-2] in PLAIN)
 
 
-def load_before() -> types.ModuleType:
-    """The rules as they were at BEFORE_REF, run from the same path so the blocklist files resolve the same way."""
-    src = subprocess.run(["git", "show", f"{BEFORE_REF}:backend/app/safety.py"], cwd=ROOT, check=True,
+def load_ref(ref: str, version: str) -> types.ModuleType:
+    """The rules as they were at `ref`, run from the same path so the blocklist files resolve the same way."""
+    src = subprocess.run(["git", "show", f"{ref}:backend/app/safety.py"], cwd=ROOT, check=True,
                          capture_output=True, text=True, encoding="utf-8").stdout
     mod = types.ModuleType("safety_before")
     mod.__file__ = safety.__file__
     exec(compile(src, "safety_before", "exec"), mod.__dict__)
-    assert mod.RULES_VERSION == "rules-v3"
+    assert mod.RULES_VERSION == version
     return mod
+
+
+def load_before() -> types.ModuleType:
+    return load_ref(BEFORE_REF, "rules-v3")
+
+
+def load_first_check() -> types.ModuleType:
+    return load_ref(FIRST_CHECK_REF, "rules-v4")
+
+
+def garbled(unit: dict) -> bool:
+    """A thread with JSON syntax in any line: a writer reply that broke its JSON (D-125)."""
+    return any(safety.JSON_FRAGMENT.search(line) for line in unit["lines"])
 
 
 def read_bits(directory: pathlib.Path) -> list[dict]:
@@ -127,12 +142,14 @@ def count_pool(units: list[dict], before, after) -> tuple[dict, list[dict]]:
     words_before = collections.Counter(r.split(":", 1)[1] for r in rb.values() if r and r.startswith("named_person:"))
     words_after = collections.Counter(r.split(":", 1)[1] for r in ra.values() if r and r.startswith("named_person:"))
     n = len(units)
+    bad = [u for u in units if garbled(u)]
     rej = lambda r: sum(v is not None for v in r.values())  # noqa: E731
     res = {"units": n, "rejected_v3": rej(rb), "rejected_v4": rej(ra),
            "share_v3": round(rej(rb) / n, 4) if n else None, "share_v4": round(rej(ra) / n, 4) if n else None,
            "reasons_v3": dict(collections.Counter(kind(v) for v in rb.values() if v)),
            "reasons_v4": dict(collections.Counter(kind(v) for v in ra.values() if v)),
            "flipped": len(flipped),
+           "garbled": len(bad), "garbled_freed": sum(ra[u["key"]] is None and rb[u["key"]] is not None for u in bad),
            "named_person_v3": sum(words_before.values()), "named_person_v4": sum(words_after.values()),
            # the first rejected word per thread; only plain words are listed, the rest are only counted
            "top_named_v3": [[w, c] for w, c in words_before.most_common() if plain(w)][:25],
@@ -172,6 +189,15 @@ def sample_flipped(flipped: dict[str, list[dict]], seed: int = SEED, n: int = SA
     return forced + random.Random(seed).sample(rest, min(n, len(rest)))
 
 
+def sample_second(flipped: dict[str, list[dict]], reviewed: set[str], seed: int = SEED + 2, n: int = SAMPLE
+                  ) -> list[tuple[str, dict]]:
+    """The second hand check: a seeded n of the freed threads that the first check did not read (`reviewed` holds every
+    key in review.json, whether or not it is still freed). Risky freed threads would come first, as in the first check."""
+    allf = sorted(((p, u) for p, us in flipped.items() for u in us if key_of(p, u) not in reviewed),
+                  key=lambda x: (x[0], x[1]["key"]))
+    return random.Random(seed).sample(allf, min(n, len(allf)))
+
+
 def freed(units_by_pool: dict[str, list[dict]], before, after) -> tuple[dict, dict, frozenset]:
     """Per pool: counts, the freed threads, and the pool|key of every risky freed thread."""
     per_pool, flipped, must = {}, {}, set()
@@ -186,7 +212,8 @@ def key_of(pool: str, unit: dict) -> str:
     return f"{pool}|{unit['key']}"
 
 
-def review_state(path: pathlib.Path = REVIEW_FILE) -> dict:
+def review_state(path: pathlib.Path | None = None) -> dict:
+    path = path or REVIEW_FILE
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
 
 
@@ -206,13 +233,23 @@ def verdict(bar_a: dict, rev: dict) -> str:
 def run(before_ref: str = BEFORE_REF, seed: int = SEED, sample: int = SAMPLE, rules: str = "") -> dict:
     """Exp 40's record. Reads the paths in SOURCE; the params pin the rules and the sample, not the machine's folders."""
     before = load_before()
-    per_pool, flipped, must = freed(pools(**SOURCE), before, safety)
-    picked = sample_flipped(flipped, seed, sample, must)
+    units = pools(**SOURCE)
+    per_pool, flipped, must = freed(units, before, safety)
+    _, first, _ = freed(units, before, load_first_check())
+    for name, pool in per_pool.items():  # what the first check was drawn from, and what has been un-freed since
+        pool["freed_at_first_check"] = len(first[name])
     bar_a = must_still_reject(safety)
-    mine = {key_of(p, u) for p, u in picked}
-    rev = review_summary({k: v for k, v in review_state().items() if k in mine}, len(picked))
+    one = review_state(REVIEW_FILE)
+    picked = sample_second(flipped, set(one), seed + 2, sample)
+    still = {key_of(p, u) for p, us in flipped.items() for u in us}
+    two = review_summary({k: v for k, v in review_state(REVIEW2_FILE).items() if k in {key_of(p, u) for p, u in picked}},
+                         len(picked))
+    first_check = review_summary(one, sample)
+    first_check["still_freed"] = sum(k in still for k in one)  # the first check's threads the current rules still free
+    first_check["verdict"] = verdict(bar_a, first_check)
     return {"rules_before": before.RULES_VERSION, "rules_after": safety.RULES_VERSION, "pools": per_pool,
-            "bar_a": bar_a, "bar_b": {**rev, "risky_all_read": len(must)}, "verdict": verdict(bar_a, rev)}
+            "bar_a": bar_a, "first_check": first_check, "bar_b": {**two, "risky_all_read": len(must)},
+            "verdict": verdict(bar_a, two)}
 
 
 SOURCE = {"ranking": ROOT / "data/dpo/bits/ranking", "train": ROOT / "data/dpo/bits/train-qwen3",
@@ -232,8 +269,10 @@ def table(res: dict) -> str:
     return "\n".join(rows)
 
 
-def review(picked: list[tuple[str, dict]], path: pathlib.Path = REVIEW_FILE, ask=input, out=print) -> dict:
-    """Shows each sampled thread and keeps yes (a real name or anything unsafe) or no. Resumes; 'q' stops."""
+def review(picked: list[tuple[str, dict]], path: pathlib.Path | None = None, ask=input, out=print) -> dict:
+    """Shows each sampled thread and keeps yes (a real name or anything unsafe) or no. Resumes; 'q' stops. Writes the
+    second check's file unless told otherwise: the first check's answers are never written again."""
+    path = path or REVIEW2_FILE
     state = review_state(path)
     for n, (pool, unit) in enumerate(picked, 1):
         key = key_of(pool, unit)
@@ -271,9 +310,8 @@ def main() -> None:
         print(table(res))
         print(f"bar (a): {res['bar_a']}; bar (b): {res['bar_b']}; verdict: {res['verdict']}")
     else:
-        _, flipped, must = freed(pools(a.ranking, a.train, a.sessions), load_before(), safety)
-        review(sample_flipped(flipped, must=must))
-
+        _, flipped, _ = freed(pools(a.ranking, a.train, a.sessions), load_before(), safety)
+        review(sample_second(flipped, set(review_state(REVIEW_FILE))))
 
 if __name__ == "__main__":
     main()

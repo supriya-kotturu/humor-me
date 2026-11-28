@@ -135,3 +135,51 @@ def test_a_freed_thread_is_risky_unless_its_first_rejected_word_was_a_plain_word
     units = [{"key": "a"}, {"key": "b"}, {"key": "c"}, {"key": "d"}]
     reasons = {"a": "named_person:That's", "b": "named_person:Market", "c": "named_person:TikTok's", "d": "blocklist:x"}
     assert [u["key"] for u in nc.risky(units, reasons)] == ["b", "d"]
+
+
+GARBLED = "Wait, the JSON in my thought trace was off, so here it is again.}]}"
+
+
+def test_the_format_rule_un_frees_a_garbled_thread_and_the_record_counts_it(tmp_path):
+    write_bits(tmp_path / "rank", [[CLEAN], [FREED, GARBLED], [FREED]])
+    units = nc.read_bits(tmp_path / "rank")
+    res, flipped = nc.count_pool(units, nc.load_before(), safety)
+    assert res["garbled"] == 1 and res["flipped"] == 1 and res["garbled_freed"] == 0
+    res_old, _ = nc.count_pool(units, nc.load_before(), nc.load_first_check())
+    assert res_old["flipped"] == 2 and nc.garbled(units[1]) and not nc.garbled(units[2])
+
+
+def test_the_second_check_never_draws_a_thread_the_first_one_read_and_is_seeded():
+    flipped = {"p": [{"key": f"k{i}", "age": "mixed", "lines": ["x"]} for i in range(200)]}
+    first = {f"p|k{i}" for i in range(0, 200, 3)}  # includes keys that may no longer be freed
+    first.add("p|gone")
+    picked = nc.sample_second(flipped, first)
+    keys = [nc.key_of(*x) for x in picked]
+    assert len(keys) == nc.SAMPLE == len(set(keys)) and not set(keys) & first
+    assert picked == nc.sample_second(flipped, first)
+    assert nc.sample_second(flipped, set(), n=500) and len(nc.sample_second({"p": flipped["p"][:7]}, set())) == 7
+
+
+def test_review_writes_the_second_file_and_leaves_the_first_intact(tmp_path, monkeypatch):
+    first, second = tmp_path / "review.json", tmp_path / "review2.json"
+    first.write_text('{"p|old": "no"}', encoding="utf-8")
+    monkeypatch.setattr(nc, "REVIEW_FILE", first)
+    monkeypatch.setattr(nc, "REVIEW2_FILE", second)
+    nc.review([("p", {"key": "k0", "age": "mixed", "lines": ["a line"]})], ask=lambda _: "n", out=lambda _: None)
+    assert json.loads(second.read_text()) == {"p|k0": "no"} and first.read_text() == '{"p|old": "no"}'
+
+
+def test_run_reports_both_checks_and_scores_the_second_on_its_own_answers(tmp_path, monkeypatch):
+    write_bits(tmp_path / "rank", [[FREED], [FREED, GARBLED], [FREED, "I told Dave."], [FREED]])
+    write_bits(tmp_path / "train", [[CLEAN]], rec_id="t0")
+    monkeypatch.setattr(nc, "SOURCE", {"ranking": tmp_path / "rank", "train": tmp_path / "train", "sessions": tmp_path / "none"})
+    first, second = tmp_path / "review.json", tmp_path / "review2.json"
+    first.write_text(json.dumps({"bonsai ranking|r0:0": "yes", "bonsai ranking|r0:1": "no"}), encoding="utf-8")
+    monkeypatch.setattr(nc, "REVIEW_FILE", first)
+    monkeypatch.setattr(nc, "REVIEW2_FILE", second)
+    res = nc.run()
+    assert res["first_check"]["reviewed"] == 2 and res["first_check"]["unsafe_or_real_name"] == 1
+    assert res["first_check"]["verdict"] == "fail" and res["first_check"]["still_freed"] == 1  # r0:1 is garbled now
+    assert res["bar_b"]["sample"] == 1 and res["verdict"] == "pending"  # r0:0 is excluded: the first check read it
+    second.write_text(json.dumps({"bonsai ranking|r0:3": "no"}), encoding="utf-8")
+    assert nc.run()["verdict"] == "adopt" and first.read_text() == json.dumps({"bonsai ranking|r0:0": "yes", "bonsai ranking|r0:1": "no"})

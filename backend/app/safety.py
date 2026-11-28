@@ -59,6 +59,8 @@ BODY_STRONG = _any(
 BODY_SOFT = _any(
     r"tall", r"short", r"big", r"small", r"heavy", r"thin", r"old", r"young", r"wide", r"wider", r"large", r"huge",
     r"tie", r"dress", r"dressed", r"suit", r"buffet", r"gym membership",
+    # Eating and diet remarks (D-125, second look): about a body when aimed at a person, fine as the robot's own.
+    r"overeat(?:s|ing)?", r"diets?", r"dieting", r"calories", r"snack choices", r"you ate", r"eating too much",
     # Clothes are only about looks when aimed at a person ("carpet is a floor wearing a sweater" is not).
     r"glasses", r"outfits?", r"sweaters?", r"shirts?", r"pants", r"jeans", r"shoes", r"clothes",
     r"looks? (?:rough|tired|terrible|awful|old|bad|sick|worn|haggard|a mess|like (?:a|an|you|he|she|they|someone))",
@@ -364,9 +366,17 @@ def _body_or_appearance(variant: str, about: re.Pattern | None = None) -> str | 
 # v2 (D-105): curly apostrophes and quotes are read as straight ones; "I’ve" had been taken for a name.
 # v3 (D-119 addendum): country, US state and big-city names are read as places, not names, so the rules accept more.
 # v4 (D-125): plain sentence words (Oh, That's, You're) and a few platform and unit names are not names. The rules accept
-# more.
+# more. Also v4 (D-125): a line with JSON syntax in it is rejected (`format:json_fragment`). No stored bit was stamped v4
+# yet, so this stayed v4. Also v4: eating and diet words (overeating, diet, calories, "you ate") aimed at a person.
 RULES_VERSION = "rules-v4"
 CURLY = str.maketrans({"’": "'", "‘": "'", "“": '"', "”": '"'})
+
+
+# A writer reply that broke its JSON can come back as lines like `...crash.}]}` or `premise": "...`. None of it can be
+# spoken. Narrow on purpose: a bare "premise:" or a quote mark alone is ordinary speech; a brace, an escaped quote, a key
+# with its quote, "JSON" and "thought trace" are not.
+JSON_FRAGMENT = re.compile(r'[{}]|\\"|"\s*(?:premise|jokes)\s*"?\s*:|(?:premise|jokes)\s*"\s*:|\bjson\b|thought trace',
+                           re.I)
 
 
 def _check(text: str, age: str, allow_caps: frozenset = frozenset(), allow_people: frozenset = frozenset()) -> Verdict:
@@ -377,6 +387,8 @@ def _check(text: str, age: str, allow_caps: frozenset = frozenset(), allow_peopl
     teens = age not in STANDARD_AGES
     lowered = text.lower()
 
+    if JSON_FRAGMENT.search(text):
+        return Verdict(False, "format:json_fragment")
     if SLUR_EUPHEMISM.search(lowered) or SLUR_PLACEHOLDER.search(lowered):
         return Verdict(False, "slur_reference")
     if any(len(MASK_CHARS.findall(t)) >= 2 and re.search(r"[a-z]", t) for t in lowered.split()):

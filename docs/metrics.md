@@ -1177,4 +1177,4 @@ Caveats:
 - The same 60 test pairs are used twice. The stricter bar reduces the risk, it does not remove it.
 - Thinking is on for Opus and off for Haiku, so a difference between the two is the model and the thinking together.
 - You agree with yourself on 12 of 20 re-ranked pairs (60%, likely range 39% to 78%; 12 of 17, 71%, ignoring ties), so a perfect copy of your taste would match one answer only about 72% to 82% of the time (p^2 + (1-p)^2 model, a judgment call). The judges at 52% and 47% sit below that, but 20 pairs leave the ranges overlapping. On the 10 test pairs among the 20, Opus agreed in both orders on 4 (2 had orders disagreeing). Both verdicts are unchanged.
-- Re-rank timing: median 62 s per answer (gaps between consecutive answers), 31 minutes first to last.
+- Re-rank timing: median 62 s per answer (gaps between consecutive answers), 31 minutes first to last. These were pairs you had already read once, so this does not estimate first-time ranking, which you report took far longer.

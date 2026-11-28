@@ -47,6 +47,25 @@ def test_the_record_lists_only_plain_words_never_a_name(tmp_path):
     assert "Dave" not in json.dumps(res) and "Gregor" not in json.dumps(res)
 
 
+def test_the_unlisted_count_covers_every_freed_thread_not_only_the_listed_top_25(tmp_path):
+    words = sorted(safety.SENTENCE_WORDS)[:40]  # 40 distinct plain words, each freed once
+    write_bits(tmp_path, [[f"He told me {w} twice."] for w in words])
+    before = nc.load_before()
+    units = [u for u in nc.read_bits(tmp_path) if not before.check_rules(u["lines"][0], "mixed").ok]
+    res, flipped = nc.count_pool(units, before, safety)
+    assert res["flipped"] == len(flipped) > 25 and len(res["top_flipped"]) == 25
+    assert res["flipped_unlisted_words"] == 0
+
+
+def test_the_review_reads_every_risky_freed_thread_and_a_seeded_50_of_the_rest():
+    flipped = {"a": [{"key": f"k{i}"} for i in range(80)], "b": [{"key": "x"}]}
+    must = frozenset({"b|x", "a|k3"})
+    picked = nc.sample_flipped(flipped, must=must)
+    keys = [nc.key_of(p, u) for p, u in picked]
+    assert keys[:2] == ["a|k3", "b|x"] and len(keys) == 2 + nc.SAMPLE and len(set(keys)) == len(keys)
+    assert picked == nc.sample_flipped(flipped, must=must)
+
+
 def test_a_threads_age_is_used_for_the_teen_rules(tmp_path):
     write_bits(tmp_path, [["We all went out for a beer."]], age="teens")
     res, _ = nc.count_pool(nc.read_bits(tmp_path), nc.load_before(), safety)
@@ -108,5 +127,11 @@ def test_run_reads_the_sources_and_leaves_the_verdict_pending_without_a_review(t
     monkeypatch.setattr(nc, "REVIEW_FILE", tmp_path / "review.json")
     res = nc.run()
     assert list(res["pools"]) == ["bonsai ranking", "qwen3 training"]  # no live-shows pool when there are no logs
-    assert res["bar_b"] == {"sample": 1, "reviewed": 0, "unsafe_or_real_name": 0} and res["verdict"] == "pending"
+    assert res["bar_b"] == {"sample": 1, "reviewed": 0, "unsafe_or_real_name": 0, "risky_all_read": 0} and res["verdict"] == "pending"
     assert "| bonsai ranking | 2 | 1 (50.0%) | 0 (0.0%) | 1 |" in nc.table(res)
+
+
+def test_a_freed_thread_is_risky_unless_its_first_rejected_word_was_a_plain_word():
+    units = [{"key": "a"}, {"key": "b"}, {"key": "c"}, {"key": "d"}]
+    reasons = {"a": "named_person:That's", "b": "named_person:Market", "c": "named_person:TikTok's", "d": "blocklist:x"}
+    assert [u["key"] for u in nc.risky(units, reasons)] == ["b", "d"]

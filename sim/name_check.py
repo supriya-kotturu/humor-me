@@ -5,8 +5,8 @@ rules as they were (rules-v3, read from git) and as they are, and compares per p
 the training bits (qwen3) and the generated candidate lines of logged live shows (never audience speech).
 
 Numbers only in the record: counts, and a word only when it is one of the plain words the fix added. No joke text is ever
-stored. `review` shows a seeded sample of the threads that flip to clean, one by one, and keeps your yes/no in a gitignored
-file; bar (b) of D-125 is that file.
+stored. `review` shows every freed thread whose first rejected word was not a plain word, then a seeded 50 of the other
+freed threads, one by one, and keeps your yes/no in a gitignored file; bar (b) of D-125 is that file.
 
     python -m sim.name_check run --ranking DIR --train DIR [--sessions DIR] [--record]
     python -m sim.name_check review --ranking DIR --train DIR [--sessions DIR]
@@ -51,8 +51,18 @@ MUST_STILL_REJECT = [
     "Oh, Dave did it again.",
     "That's what Priya said to me yesterday.",
     "My landlord Gregor unplugged me.",  # not a listed first name: a mid-sentence capital
+    # added in review: surnames that are not in FIRST_NAMES, right after a clause opener
+    "Breaking news: Musk unplugged me.",
+    "My boss said - Obama unplugged me.",
+    "My boss said — Bezos unplugged me.",
+    "He sighed… Gregor unplugged me again.",
+    "He said, 'Swift's the one who unplugged me.'",
 ]
 PLAIN = safety.SENTENCE_WORDS | safety.CAPS_OK  # the only words a record may list: none is a person
+
+
+def plain(word: str) -> bool:
+    return word in PLAIN or (word.endswith("'s") and word[:-2] in PLAIN)
 
 
 def load_before() -> types.ModuleType:
@@ -125,14 +135,19 @@ def count_pool(units: list[dict], before, after) -> tuple[dict, list[dict]]:
            "flipped": len(flipped),
            "named_person_v3": sum(words_before.values()), "named_person_v4": sum(words_after.values()),
            # the first rejected word per thread; only plain words are listed, the rest are only counted
-           "top_named_v3": [[w, c] for w, c in words_before.most_common() if w in PLAIN or w.rstrip("'s") in PLAIN][:25],
-           "other_named_v3": sum(c for w, c in words_before.items() if not (w in PLAIN or w.rstrip("'s") in PLAIN)),
+           "top_named_v3": [[w, c] for w, c in words_before.most_common() if plain(w)][:25],
+           "other_named_v3": sum(c for w, c in words_before.items() if not plain(w)),
            "top_flipped": [[w, c] for w, c in collections.Counter(
                rb[u["key"]].split(":", 1)[1] for u in flipped if rb[u["key"]].startswith("named_person:")
-           ).most_common() if w in PLAIN][:25]}
-    res["flipped_unlisted_words"] = sum(1 for u in flipped if rb[u["key"]].startswith("named_person:")) - sum(
-        c for _, c in res["top_flipped"])
+           ).most_common() if plain(w)][:25],
+           # counted from every freed thread, not from the capped list above
+           "flipped_unlisted_words": len(risky(flipped, rb))}
     return res, flipped
+
+
+def risky(flipped: list[dict], reasons: dict) -> list[dict]:
+    """Freed threads whose first word rejected by rules-v3 is not a plain word: the ones a person must read."""
+    return [u for u in flipped if not (r := reasons[u["key"]]).startswith("named_person:") or not plain(r.split(":", 1)[1])]
 
 
 def must_still_reject(after) -> dict:
@@ -148,9 +163,23 @@ def pools(ranking, train, sessions) -> dict[str, list[dict]]:
     return out
 
 
-def sample_flipped(flipped: dict[str, list[dict]], seed: int = SEED, n: int = SAMPLE) -> list[tuple[str, dict]]:
+def sample_flipped(flipped: dict[str, list[dict]], seed: int = SEED, n: int = SAMPLE,
+                   must: frozenset = frozenset()) -> list[tuple[str, dict]]:
+    """Every freed thread in `must` (pool|key, the risky ones), then a seeded n of the rest, all pools together."""
     allf = sorted(((p, u) for p, us in flipped.items() for u in us), key=lambda x: (x[0], x[1]["key"]))
-    return random.Random(seed).sample(allf, min(n, len(allf)))
+    forced = [x for x in allf if key_of(*x) in must]
+    rest = [x for x in allf if key_of(*x) not in must]
+    return forced + random.Random(seed).sample(rest, min(n, len(rest)))
+
+
+def freed(units_by_pool: dict[str, list[dict]], before, after) -> tuple[dict, dict, frozenset]:
+    """Per pool: counts, the freed threads, and the pool|key of every risky freed thread."""
+    per_pool, flipped, must = {}, {}, set()
+    for name, units in units_by_pool.items():
+        per_pool[name], flipped[name] = count_pool(units, before, after)
+        reasons = {u["key"]: first_reason(before, u) for u in flipped[name]}
+        must |= {key_of(name, u) for u in risky(flipped[name], reasons)}
+    return per_pool, flipped, frozenset(must)
 
 
 def key_of(pool: str, unit: dict) -> str:
@@ -177,15 +206,13 @@ def verdict(bar_a: dict, rev: dict) -> str:
 def run(before_ref: str = BEFORE_REF, seed: int = SEED, sample: int = SAMPLE, rules: str = "") -> dict:
     """Exp 40's record. Reads the paths in SOURCE; the params pin the rules and the sample, not the machine's folders."""
     before = load_before()
-    per_pool, flipped = {}, {}
-    for name, units in pools(**SOURCE).items():
-        per_pool[name], flipped[name] = count_pool(units, before, safety)
-    picked = sample_flipped(flipped, seed, sample)
+    per_pool, flipped, must = freed(pools(**SOURCE), before, safety)
+    picked = sample_flipped(flipped, seed, sample, must)
     bar_a = must_still_reject(safety)
     mine = {key_of(p, u) for p, u in picked}
     rev = review_summary({k: v for k, v in review_state().items() if k in mine}, len(picked))
     return {"rules_before": before.RULES_VERSION, "rules_after": safety.RULES_VERSION, "pools": per_pool,
-            "bar_a": bar_a, "bar_b": rev, "verdict": verdict(bar_a, rev)}
+            "bar_a": bar_a, "bar_b": {**rev, "risky_all_read": len(must)}, "verdict": verdict(bar_a, rev)}
 
 
 SOURCE = {"ranking": ROOT / "data/dpo/bits/ranking", "train": ROOT / "data/dpo/bits/train-qwen3",
@@ -244,11 +271,8 @@ def main() -> None:
         print(table(res))
         print(f"bar (a): {res['bar_a']}; bar (b): {res['bar_b']}; verdict: {res['verdict']}")
     else:
-        before = load_before()
-        flipped = {}
-        for name, units in pools(a.ranking, a.train, a.sessions).items():
-            flipped[name] = count_pool(units, before, safety)[1]
-        review(sample_flipped(flipped))
+        _, flipped, must = freed(pools(a.ranking, a.train, a.sessions), load_before(), safety)
+        review(sample_flipped(flipped, must=must))
 
 
 if __name__ == "__main__":

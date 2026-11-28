@@ -63,7 +63,7 @@ The learning rate warms up, peaks, then decays almost to zero, so the last steps
 | Third-last step | 2.4 × 10⁻⁷ | 0.00000024 | 2.4% |
 | Last step | 6.2 × 10⁻⁸ | 0.000000062 | about 0.6% |
 
-Annotated logs: [start of training](../../reports/figures/dpo/dpo-C-training-start.png), [end of training](../../reports/figures/dpo/dpo-C-training-log.png).
+Annotated logs: [start of training](../../reports/figures/dpo/dpo-C-training-start.png), [end of training](../../reports/figures/dpo/dpo-C-training-log.png), [last 10 steps as a table](../../reports/figures/dpo/dpo-C-training-table.png).
 
 ## Reading a training run (writer B's SFT)
 
@@ -79,7 +79,7 @@ DPO on top of B's SFT copy, one pass over the pairs, 186 steps, 22 minutes of tr
 - **Unlike C, both rewards fall.** C made the chosen bit more likely and the rejected one less. B makes both less likely than its SFT copy, the rejected one much more. DPO only rewards the gap, so this still counts as learning, but if it goes too far the writing gets worse. Writer B's eval bits (step 13) and the vote will show it.
 - Peak GPU memory 8.8 GiB of 32.
 
-Annotated logs: [start of training](../../reports/figures/dpo/dpo-B-training-start.png), [end of training](../../reports/figures/dpo/dpo-B-training-log.png). Job results: [sacct](../../reports/figures/dpo/dpo-B-sacct.png); the two GGUF files have different hashes, so B and C are different models: [hashes](../../reports/figures/dpo/gguf-hashes.png).
+Annotated logs: [start of training](../../reports/figures/dpo/dpo-B-training-start.png), [end of training](../../reports/figures/dpo/dpo-B-training-log.png), [last 10 steps as a table](../../reports/figures/dpo/dpo-B-training-table.png); set it beside C's table to see the rewards move in opposite directions. Job results: [sacct](../../reports/figures/dpo/dpo-B-sacct.png); the two GGUF files have different hashes, so B and C are different models: [hashes](../../reports/figures/dpo/gguf-hashes.png).
 
 ## Going deeper
 

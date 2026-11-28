@@ -49,11 +49,29 @@ All three start from `qwen3:4b-instruct` (D-124). The model the show uses today,
 
 The model sees its prompt as text in a fixed layout (a chat template). Ollama's layout for this model has a blank line after the system text that the Hugging Face one does not. The writer's bits and the live show both go through Ollama, so training uses Ollama's layout; a test compares it with what the real template renders.
 
+## Reading a training run (writer B's SFT)
+
+SFT on 728 judge-chosen threads, 2 passes, 16 minutes: loss 0.96 to 0.51, tokens predicted right 76% to about 81%, and entropy 0.98 to 0.54. Lower entropy means more confident, less varied word choices, the usual cost of SFT; check B's bits for repetition. SFT's learning rate peaks 10 times higher than DPO's: 1 × 10⁻⁴ (0.0001) after a warm-up of about 9 of 182 steps, decaying to 7.5 × 10⁻⁸ by the end. [Annotated log](../../reports/figures/dpo/sft-B-training-log.png).
+
+## Reading a training run (writer B's DPO)
+
+DPO's loss starts at 0.693 (ln 2, a coin flip): at step 0 the trained model equals its frozen reference copy, so it has no preference yet. B's DPO runs on top of its SFT copy: one pass over the pairs, 186 steps, 22 minutes of training (32 for the whole job). The estimate was 3 to 6 hours.
+
+- Loss 0.69 to 0.55 on average, and 0.14 at the last step. Reward accuracy ends between 0.75 and 1.0.
+- The learning rate warms up, peaks, then decays almost to zero: 0 at step 1, a peak of 1 × 10⁻⁵ (0.00001) after about 19 steps, and 8.0 × 10⁻⁹ at the end.
+- The fp16 scaler skipped steps 5 and 36 (`grad_norm` nan, loss fine). That is normal; training went on.
+- **Both rewards fall.** B makes both bits less likely than its SFT copy, the rejected one much more. DPO only rewards the gap, so this still counts as learning, but if it goes too far the writing gets worse. Writer B's eval bits (step 13) and the vote will show it. C, below, behaves the other way.
+- Peak GPU memory 8.8 GiB of 32.
+
+![Writer B's last 10 DPO steps: both rewards negative, rejected lower](../../reports/figures/dpo/dpo-B-training-table.png)
+
+Annotated logs: [start of training](../../reports/figures/dpo/dpo-B-training-start.png), [end of training](../../reports/figures/dpo/dpo-B-training-log.png).
+
 ## Reading a training run (writer C)
 
-DPO's loss starts at 0.693 (ln 2, a coin flip): at step 0 the trained model equals its frozen reference copy, so it has no preference yet. Writer C (DPO on 119 human-ranked pairs, 3 passes) ended at 0.52 and preferred the human-chosen bit on almost every training pair, which with so few pairs means memorising; only blind votes on new prompts show whether it generalises.
+Writer C (DPO on 119 human-ranked pairs, 3 passes) ended at 0.52 and preferred the human-chosen bit on almost every training pair, which with so few pairs means memorising; only blind votes on new prompts show whether it generalises.
 
-The learning rate warms up, peaks, then decays almost to zero, so the last steps barely change the model:
+The learning rate has the same shape as B's, so the last steps barely change the model:
 
 | Where | Learning rate | Plain decimal | Share of the peak |
 |---|---|---|---|
@@ -65,27 +83,11 @@ The learning rate warms up, peaks, then decays almost to zero, so the last steps
 
 ![Writer C's last 10 DPO steps: chosen reward positive, rejected near 0.4](../../reports/figures/dpo/dpo-C-training-table.png)
 
+Compare with B's table above: B's chosen reward falls, C's rises.
+
 Annotated logs: [start of training](../../reports/figures/dpo/dpo-C-training-start.png), [end of training](../../reports/figures/dpo/dpo-C-training-log.png).
 
-## Reading a training run (writer B's SFT)
-
-SFT on 728 judge-chosen threads, 2 passes, 16 minutes: loss 0.96 to 0.51, tokens predicted right 76% to about 81%, and entropy 0.98 to 0.54. Lower entropy means more confident, less varied word choices, the usual cost of SFT; check B's bits for repetition. SFT's learning rate peaks 10 times higher than DPO's: 1 × 10⁻⁴ (0.0001) after a warm-up of about 9 of 182 steps, decaying to 7.5 × 10⁻⁸ by the end. [Annotated log](../../reports/figures/dpo/sft-B-training-log.png).
-
-## Reading a training run (writer B's DPO)
-
-DPO on top of B's SFT copy, one pass over the pairs, 186 steps, 22 minutes of training (32 for the whole job). The estimate was 3 to 6 hours.
-
-- Loss 0.69 to 0.55 on average, and 0.14 at the last step. Reward accuracy ends between 0.75 and 1.0.
-- The learning rate follows C's shape: 0 at step 1, a peak of 1 × 10⁻⁵ (0.00001) after about 19 steps, and 8.0 × 10⁻⁹ at the end.
-- The fp16 scaler skipped steps 5 and 36 (`grad_norm` nan, loss fine). That is normal; training went on.
-- **Unlike C, both rewards fall.** C made the chosen bit more likely and the rejected one less. B makes both less likely than its SFT copy, the rejected one much more. DPO only rewards the gap, so this still counts as learning, but if it goes too far the writing gets worse. Writer B's eval bits (step 13) and the vote will show it.
-- Peak GPU memory 8.8 GiB of 32.
-
-![Writer B's last 10 DPO steps: both rewards negative, rejected lower](../../reports/figures/dpo/dpo-B-training-table.png)
-
-Compare with C's table above: C's chosen reward rises, B's falls.
-
-Annotated logs: [start of training](../../reports/figures/dpo/dpo-B-training-start.png), [end of training](../../reports/figures/dpo/dpo-B-training-log.png).
+## Both writers' files
 
 Job results: [sacct](../../reports/figures/dpo/dpo-B-sacct.png). The two GGUF files have different hashes, so B and C are different models: [hashes](../../reports/figures/dpo/gguf-hashes.png).
 

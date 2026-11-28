@@ -17,6 +17,14 @@ shares the one GPU and the show's 12 s bit deadline would suffer):
     python -m sim.dpo_pairs score --model opus --record       # -> reports/metrics/dpo_judge_gate_opus.json
     python -m sim.dpo_pairs pool --split train --rebuild      # later, with 3+ days stored, before any judge labelling
 
+D-123 (the pool for training, see sim/dpo_train.py and sim/dpo_eval.py; the full run order is in explorer/README.md):
+    python -m sim.dpo_pairs write --split train --writer qwen3:4b-instruct --env-file backend/.env   # -> data/dpo/bits/train-qwen3/
+    python -m sim.dpo_pairs label --split train --writer qwen3:4b-instruct --env-file backend/.env   # Haiku, both orders
+    python -m sim.dpo_pairs export --writer qwen3:4b-instruct                                         # -> data/dpo/train/
+    python -m sim.dpo_pairs eval write|plan|power|bar|vote|judge|score ...                             # Exp 38
+`--writer` on write and topup names the model that writes (default: the live writer, JOKE_WRITER_MODEL or bonsai-2:4b); its bits
+go to their own folder and every record carries its name, so one writer's bits never answer for another's.
+
 Prompts. `pool` writes `data/dpo/pool.json` once (gitignored, it holds headline gists): a seeded pool of bit requests built the
 way the live show builds them (`ThreadGenerator`, gen-v5, material off, tonight's context on for half). Two disjoint
 splits, fixed before any data: RANKING_N prompts for the 120 pairs you rank, TRAIN_N for DPO later. Half of every split
@@ -50,6 +58,7 @@ import os
 import pathlib
 import random
 import sys
+import threading
 import time
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -129,8 +138,23 @@ def pool_path(root: pathlib.Path | None = None) -> pathlib.Path:
     return (root or DATA) / "pool.json"
 
 
-def bit_path(root: pathlib.Path, split: str, pid: str) -> pathlib.Path:
-    return root / "bits" / split / f"{pid}.json"
+def live_writer() -> str:
+    return tc.writer_model()
+
+
+def writer_slug(writer: str) -> str:
+    """The short name a writer's bits folder carries: `qwen3:4b-instruct` is `qwen3` (the record keeps the full name and every
+    read checks it, so two models with one slug cannot share a folder unnoticed)."""
+    return "".join(c if c.isalnum() or c in "-_." else "-" for c in writer.split(":")[0])
+
+
+def bits_folder(split: str, writer: str | None = None) -> str:
+    """`train` for the first writer (bonsai, the folders written before D-123), `train-qwen3` for another (D-123)."""
+    return split if writer in (None, llm.OLLAMA_MODEL) else f"{split}-{writer_slug(writer)}"
+
+
+def bit_path(root: pathlib.Path, split: str, pid: str, writer: str | None = None) -> pathlib.Path:
+    return root / "bits" / bits_folder(split, writer) / f"{pid}.json"
 
 
 def rank_path(root: pathlib.Path) -> pathlib.Path:
@@ -296,6 +320,9 @@ def rebuild_train(root: pathlib.Path | None = None, tonight_dir: pathlib.Path | 
     labels = root / "labels"
     if labels.exists() and any(labels.iterdir()):
         raise SystemExit("training bits are already labelled (data/dpo/labels): the training split is frozen")
+    other = sorted(f.name for f in (root / "bits").glob("train-*")) if (root / "bits").exists() else []
+    if other:
+        raise SystemExit(f"bits were written for the training split by another writer ({', '.join(other)}): the split is frozen")
     days = load_days(tonight_dir)
     now = {d["date"]: d for d in days}
     ranking = [p for p in old["prompts"] if p["split"] == "ranking"]
@@ -358,10 +385,42 @@ def set_allow(live_safety, prompt: dict, days: dict[str, dict]) -> None:
     live_safety.allow_people = t.allow_people if t else frozenset()
 
 
-def request_digest(request: str, generator_id: str) -> str:
+def request_digest(request: str, generator_id: str, writer: str | None = None) -> str:
     parts = [request, generator_id, str((generate.K, generate.JOKES, generate.TEMPERATURE, generate.GENERATOR_TIMING,
-                                         generate.RETRIES, generate.WRITER_CONTEXT)), tc.writer_model()]
+                                         generate.RETRIES, generate.WRITER_CONTEXT)), writer or tc.writer_model()]
     return hashlib.sha256("\x00".join(parts).encode()).hexdigest()[:12]
+
+
+class Capture:
+    """Wraps a writer client to keep every reply it returns, so a thread can be stored with the exact text the model wrote
+    (D-123: SFT and DPO train on that text, not on a re-serialisation of the parsed lines). Everything else passes through."""
+
+    def __init__(self, client):
+        self._client, self.replies, self._lock = client, [], threading.Lock()
+
+    def chat(self, *args, **kwargs):
+        reply = self._client.chat(*args, **kwargs)
+        with self._lock:
+            self.replies.append(str(reply))
+        return reply
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
+
+
+def attach_raw(threads: list[dict], replies: list[str]) -> None:
+    """Gives each thread the reply that parses to it. A reply that does not parse (a bad shape that was asked again) matches no
+    thread; a thread with no match keeps no `raw`, and export skips it."""
+    parsed = {}
+    for text in replies:
+        try:
+            premise, lines = generate.parse(text)
+        except generate.GenerationError:
+            continue
+        parsed.setdefault((premise, tuple(lines)), text)
+    for t in threads:
+        if (raw := parsed.get((t["premise"], tuple(t["lines"])))) is not None:
+            t["raw"] = raw
 
 
 def check_threads(threads: list[dict], live_safety, age: str) -> bool:
@@ -378,13 +437,14 @@ def check_threads(threads: list[dict], live_safety, age: str) -> bool:
 
 
 def write_bit(client, live_safety, prompt: dict, days: dict[str, dict]) -> dict:
-    gen = new_generator(client, prompt, days)
+    cap = Capture(client)
+    gen = new_generator(cap, prompt, days)
     set_allow(live_safety, prompt, days)
     bad0 = client.bad_replies
     start = time.perf_counter()
     rec = {"id": prompt["id"], "split": prompt["split"], "half": prompt["half"], "mode": prompt["mode"], "bit": prompt["bit"],
            "context": prompt["context"], "told": prompt["told"], "day": prompt["day"], "gist": prompt["gist"],
-           "generator_id": gen.generator_id, "request": None, "threads": [], "lost": [], "failure": None}
+           "generator_id": gen.generator_id, "writer": client.model, "request": None, "threads": [], "lost": [], "failure": None}
     try:
         gen.generate(prompt["mode"], prompt["bit"], 0, prompt["context"])
     except Exception as e:  # noqa: BLE001 - a bit with no thread is a result, not a crash
@@ -396,9 +456,10 @@ def write_bit(client, live_safety, prompt: dict, days: dict[str, dict]) -> dict:
         rec["request"], rec["lost"] = request, list(lost)
         rec["threads"] = [{"premise": premises[i], "lines": [lines_major[j][i] for j in range(generate.JOKES)]}
                           for i in range(len(premises))]
+        attach_raw(rec["threads"], cap.replies)
     rec["wall_s"] = time.perf_counter() - start
     rec["bad_replies"] = client.bad_replies - bad0
-    rec["digest"] = request_digest(rec["request"] or "", gen.generator_id)
+    rec["digest"] = request_digest(rec["request"] or "", gen.generator_id, client.model)
     return finish(rec, live_safety, prompt["context"]["age"])
 
 
@@ -419,9 +480,11 @@ def done(rec: dict | None) -> bool:
     return rec is not None and bool(rec.get("threads")) and not rec.get("safety_infra_error")
 
 
-def same_prompt(rec: dict | None, p: dict) -> bool:
-    """The record was written for this prompt, not for another pool's prompt with the same id (a rebuild while a writer ran)."""
-    return rec is not None and all(rec.get(k) == p[k] for k in PROMPT_FIELDS)
+def same_prompt(rec: dict | None, p: dict, writer: str | None = None) -> bool:
+    """The record was written for this prompt, not for another pool's prompt with the same id (a rebuild while a writer ran),
+    and by `writer` when one is given (a record from before D-123 has no writer: it is the first one's, bonsai's)."""
+    return (rec is not None and all(rec.get(k) == p[k] for k in PROMPT_FIELDS)
+            and (writer is None or rec.get("writer", llm.OLLAMA_MODEL) == writer))
 
 
 def write(split: str, client, live_safety, pool: dict, root: pathlib.Path | None = None, n: int | None = None,
@@ -433,12 +496,13 @@ def write(split: str, client, live_safety, pool: dict, root: pathlib.Path | None
     days = {d["date"]: d for d in pool["days"]}
     mine = [p for p in pool["prompts"] if p["split"] == split]
     total = len(mine)
-    ready = sum(done(r) and same_prompt(r, p) for p in mine if (r := _read(bit_path(root, split, p["id"]))) is not None)
+    w = client.model  # the writer: its bits have their own folder and carry its name (D-123)
+    ready = sum(done(r) and same_prompt(r, p, w) for p in mine if (r := _read(bit_path(root, split, p["id"], w))) is not None)
     wrote = empty = 0
     for i, p in enumerate(mine, 1):
-        path = bit_path(root, split, p["id"])
+        path = bit_path(root, split, p["id"], w)
         rec = _read(path)
-        if not same_prompt(rec, p):
+        if not same_prompt(rec, p, w):
             rec = None
         if done(rec):
             continue
@@ -473,7 +537,8 @@ def topup_bit(client, live_safety, rec: dict, prompt: dict, days: dict[str, dict
     """One more batch of 3 threads for a written bit, on the request stored in the record. Appends the threads that came
     back (the originals stay, in front) and returns the new record; None when no thread came back or the safety layer
     failed (nothing is stored, so a rerun tries again). Raises if the request is not the stored one."""
-    gen = new_generator(client, prompt, days)
+    cap = Capture(client)
+    gen = new_generator(cap, prompt, days)
     set_allow(live_safety, prompt, days)
     start = time.perf_counter()
     try:
@@ -481,17 +546,18 @@ def topup_bit(client, live_safety, rec: dict, prompt: dict, days: dict[str, dict
     except Exception:  # noqa: BLE001 - no thread this time is not a crash
         return None
     request, lines_major, premises, lost = gen._bits[prompt["bit"]]
-    if request != rec["request"] or gen.generator_id != rec["generator_id"] or             request_digest(request, gen.generator_id) != rec["digest"]:
+    if request != rec["request"] or gen.generator_id != rec["generator_id"] or request_digest(request, gen.generator_id, client.model) != rec["digest"]:
         raise SystemExit(f"{rec['id']}: the request rebuilt from the pool is not the stored one; nothing was changed")
     batch = len(rec.get("topups", [])) + 1
     new = [{"premise": premises[i], "lines": [lines_major[j][i] for j in range(generate.JOKES)], "batch": batch}
            for i in range(len(premises))]
+    attach_raw(new, cap.replies)
     if check_threads(new, live_safety, prompt["context"]["age"]):
         return None
     out = dict(rec)
     out["threads"] = [{**t, "batch": t.get("batch", 0)} for t in rec["threads"]] + new
     out["topups"] = list(rec.get("topups", [])) + [{
-        "batch": batch, "digest": request_digest(request, gen.generator_id), "threads": len(new), "lost": list(lost),
+        "batch": batch, "digest": request_digest(request, gen.generator_id, client.model), "threads": len(new), "lost": list(lost),
         "wall_s": time.perf_counter() - start, "rules": safety.RULES_VERSION,
         "at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}]
     return out
@@ -505,7 +571,8 @@ def topup(split: str, client, live_safety, pool: dict, root: pathlib.Path | None
     root = root or DATA
     days = {d["date"]: d for d in pool["days"]}
     mine = [p for p in pool["prompts"] if p["split"] == split]
-    todo = [(p, r) for p in mine if (r := _read(bit_path(root, split, p["id"]))) is not None and same_prompt(r, p)
+    w = client.model
+    todo = [(p, r) for p in mine if (r := _read(bit_path(root, split, p["id"], w))) is not None and same_prompt(r, p, w)
             and done(r) and clean_count(r) < 2 and len(r.get("topups", [])) < cap]
     added = empty = 0
     for i, (p, rec) in enumerate(todo, 1):
@@ -520,7 +587,7 @@ def topup(split: str, client, live_safety, pool: dict, root: pathlib.Path | None
                 break
             empty = 0
             rec = new
-            _write(bit_path(root, split, p["id"]), rec)
+            _write(bit_path(root, split, p["id"], w), rec)
             added += 1
             out(f"[{i}/{len(todo)}] {p['id']} batch {len(rec['topups'])}: {clean_count(rec)} clean of {len(rec['threads'])}")
     return added
@@ -959,10 +1026,17 @@ def table(res: dict, which: str = "haiku") -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("command", choices=("pool", "write", "topup", "rank", "rerank", "judge", "score"))
+    ap.add_argument("command", choices=("pool", "write", "topup", "rank", "rerank", "judge", "score", "label", "export", "modelfile", "eval"))
+    ap.add_argument("sub", nargs="?", help="eval: write, plan, power, bar, vote, judge or score")
+    ap.add_argument("--writer", help="write, topup, label, export: the model that writes (default: the live writer); eval write: A, B, C or a model name")
+    ap.add_argument("--workers", type=int, default=4, help="label: parallel Haiku calls after the first (which writes the prompt cache)")
+    ap.add_argument("--base", help="modelfile: the text of `ollama show qwen3:4b-instruct --modelfile`")
+    ap.add_argument("--gguf", help="modelfile: the trained model's GGUF file")
+    ap.add_argument("--out", help="modelfile: where to write the Modelfile")
+    ap.add_argument("--wins", type=int, help="eval bar: wins of 15 a trained writer needs")
     ap.add_argument("--split", choices=("ranking", "train"), help="write: which split; pool --rebuild --split train rebuilds only the training split")
     ap.add_argument("--n", type=int, help="write: stop after this many new bits")
-    ap.add_argument("--limit", type=int, help="rank, rerank: ask at most this many questions this sitting")
+    ap.add_argument("--limit", type=int, help="rank, rerank, eval vote: ask at most this many questions this sitting; label: at most this many calls")
     ap.add_argument("--rebuild", action="store_true", help="pool: replace the frozen pool (invalidates every written bit)")
     ap.add_argument("--tonight-dir", help="pool: where the stored `sim.tonight fetch` folders are (default data/tonight)")
     ap.add_argument("--record", action="store_true", help="score: save the result as the Exp 36 record (Exp 37 with --model opus)")
@@ -991,10 +1065,11 @@ def main() -> None:
         if not a.split:
             raise SystemExit(f"{a.command} needs --split ranking or --split train")
         pool = ensure_pool(tonight_dir=tonight_dir)
-        client = generate.writer_client()
+        client = generate.writer_client(a.writer)
         if not getattr(client, "local", False):
             raise SystemExit("the pair writer is the local writer: set JOKE_WRITER_PROVIDER=ollama")
-        print("Do not run this during a live show: it shares the GPU. Ctrl-C is safe; rerun to resume.", flush=True)
+        print(f"Writer {client.model}, bits in data/dpo/bits/{bits_folder(a.split, client.model)}/. "
+              "Do not run this during a live show: it shares the GPU. Ctrl-C is safe; rerun to resume.", flush=True)
         generate.warm_up(generate.ThreadGenerator(client))
         live_safety = generate.LiveSafety(llm.from_env(generate.FILTER_TIMING[0], role="safety_check", retries=generate.FILTER_RETRIES,
                                                        deadline_s=generate.FILTER_TIMING[1]))
@@ -1006,6 +1081,29 @@ def main() -> None:
         except KeyboardInterrupt:
             raise SystemExit("stopped; finished bits are saved, rerun to resume")
         print(f"wrote {wrote} new bits")
+        return
+    if a.command == "modelfile":
+        from sim import dpo_train
+        if not (a.base and a.gguf and a.out):
+            raise SystemExit("modelfile needs --base, --gguf and --out")
+        pathlib.Path(a.out).write_text(dpo_train.modelfile_for(pathlib.Path(a.base).read_text(encoding="utf-8"), a.gguf), encoding="utf-8")
+        print(f"wrote {a.out}: `ollama create <name> -f {a.out}`")
+        return
+    if a.command == "export":
+        from sim import dpo_train
+        dpo_train.export(a.writer or live_writer())
+        return
+    if a.command == "eval":
+        from sim import dpo_eval
+        dpo_eval.main(a)
+        return
+    if a.command == "label":
+        from sim import dpo_train
+        if a.split != "train":
+            raise SystemExit("label --split train")
+        pool, state, pairs = need_pairs()
+        writer = a.writer or live_writer()
+        dpo_train.label_all(dpo_train.make_label_client(), a.split, writer, pairs, pool, workers=a.workers, limit=a.limit)
         return
     if a.command == "rank":
         pool = _read(pool_path())

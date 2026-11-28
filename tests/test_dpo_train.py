@@ -420,3 +420,19 @@ def test_a_pair_of_identical_replies_is_not_a_dpo_row(pool):
     rows = [{"bit": p["id"], "i": 0, "j": 1, "status": "label", "winner": 0}, {"bit": p["id"], "i": 0, "j": 2, "status": "label", "winner": 0}]
     _, dpo, counts = dt.export_b(rows, {p["id"]: rec})
     assert [r["id"] for r in dpo] == [f"{p['id']}-0-2"] and counts["skipped_identical"] == 1
+
+
+def test_the_capturing_wrapper_sends_what_the_show_sends_and_stores_each_reply_verbatim(pool):
+    """write_bit wraps the client to keep the replies: the bodies must still be the show's, and every thread its own reply."""
+    d = day()
+    prompt = next(p for p in pool["prompts"] if p["split"] == "train" and p["half"] == "tonight")
+    fake, show = FakeOllama(), FakeOllama()
+    rec = dp.write_bit(client_for(QWEN, fake), FakeSafety(), prompt, {d["date"]: d})
+    sg = dp.new_generator(client_for(QWEN, show), prompt, {d["date"]: d})
+    sg.generate(prompt["mode"], prompt["bit"], 0, prompt["context"])
+    strip = lambda bodies: sorted(json.dumps(b, sort_keys=True) for b in bodies)  # noqa: E731 - the calls run in parallel
+    assert strip(fake.seen) == strip(show.seen) and len(fake.seen) == generate.K
+    assert rec["writer"] == QWEN and rec["request"] == f"{fake.seen[0]['messages'][0]['content']}\n\n{fake.seen[0]['messages'][1]['content']}"
+    raws = [t["raw"] for t in rec["threads"]]
+    assert len(set(raws)) == len(raws) == generate.K and all(generate.parse(r) == (t["premise"], t["lines"]) for r, t in zip(raws, rec["threads"]))
+    assert dt.split_request(rec["request"]) == fake.seen[0]["messages"]

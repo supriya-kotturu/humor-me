@@ -65,6 +65,10 @@ The learning rate warms up, peaks, then decays almost to zero, so the last steps
 
 Annotated logs: [start of training](../../reports/figures/dpo/dpo-C-training-start.png), [end of training](../../reports/figures/dpo/dpo-C-training-log.png).
 
+## Reading a training run (writer B's SFT)
+
+SFT on 728 judge-chosen threads, 2 passes, 16 minutes: loss 0.96 to 0.51, tokens predicted right 76% to about 81%, and entropy 0.98 to 0.54. Lower entropy means more confident, less varied word choices, the usual cost of SFT; check B's bits for repetition. SFT's learning rate peaks 10 times higher than DPO's: 1 × 10⁻⁴ (0.0001) after a warm-up of about 9 of 182 steps, decaying to 7.5 × 10⁻⁸ by the end. [Annotated log](../../reports/figures/dpo/sft-B-training-log.png).
+
 ## Going deeper
 
 - [Direct Preference Optimization](https://arxiv.org/abs/2305.18290) (Rafailov et al., 2023): the method.

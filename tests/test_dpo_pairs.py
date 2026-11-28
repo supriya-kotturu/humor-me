@@ -987,3 +987,13 @@ def test_a_new_rank_or_rerank_answer_carries_a_utc_time_and_old_answers_still_sc
     assert all(a["at"].endswith("+00:00") for a in dp.read_rerank(tmp_path)["answers"].values())
     old = {pid: {k: v for k, v in a.items() if k != "at"} for pid, a in state["answers"].items()}
     assert len(dp.decided({"answers": old}, pool)) and sum(dp.decided({"answers": old}, pool).values()) == 120
+
+
+def test_judge_vs_judge_counts_the_pairs_both_judges_answered_consistently_and_ignores_teach_pairs(tmp_path):
+    pairs = fake_pairs()
+    dp.judge_all(FakeJudge(right=22, consistent=30), pairs, tmp_path, out=lambda *_: None, which="opus")
+    dp.judge_all(FakeJudge(right=18, consistent=30), pairs, tmp_path, out=lambda *_: None)
+    res = dp.judge_vs_judge(pairs, tmp_path)
+    assert res["pairs"] == 30 and res["teach_pairs_answered"] == 0
+    assert res["opus_agrees_with_you"] == 22 and res["haiku_agrees_with_you"] == 18
+    assert res["same"] >= 22 + 18 - 30 and res["same"] <= 18 + (30 - 22)

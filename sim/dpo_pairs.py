@@ -838,6 +838,32 @@ def summarize(pairs: list[dict], letters: dict[tuple[str, str], str | None], tie
             "judge": {"provider": judge_model(which)[0], "model": judge_model(which)[1], "teach_pairs": sum(p["role"] == "teach" for p in pairs)}}
 
 
+def judge_vs_judge(pairs: list[dict], root: pathlib.Path | None = None) -> dict:
+    """Exp 37, reported only, no bar: on test pairs both judges answered the same way in both orders, how often they pick
+    the same thread, and how often each picks yours. Reads both stored caches; no calls. Teach pairs are in the prompt,
+    so neither cache holds an answer for them."""
+    sides = {w: read_letters(pairs, root, w) for w in ("haiku", "opus")}
+    picks = {w: {} for w in sides}
+    for w, letters in sides.items():
+        for p in pairs:
+            if p["role"] != "test":
+                continue
+            two = [picked_thread(letters.get((p["id"], o)), o) for o in ORDERS]
+            if None not in two and two[0] == two[1]:
+                picks[w][p["id"]] = two[0]
+    both = [p for p in pairs if p["id"] in picks["haiku"] and p["id"] in picks["opus"]]
+    same = sum(picks["haiku"][p["id"]] == picks["opus"][p["id"]] for p in both)
+    z = Z["opus"]
+    out = {"pairs": len(both), "same": same, "same_range975": jc.wilson(same, len(both), z) if both else None}
+    for w in sides:
+        k = sum(picks[w][p["id"]] == p["winner"] for p in both)
+        out[f"{w}_agrees_with_you"] = k
+        out[f"{w}_range975"] = jc.wilson(k, len(both), z) if both else None
+    out["teach_pairs_answered"] = sum(p["role"] == "teach" and any(letters.get((p["id"], o)) for letters in sides.values() for o in ORDERS)
+                                      for p in pairs)
+    return out
+
+
 def passes(a: int, c: int, z: float = Z["haiku"]) -> bool:
     """D-121's gate: enough pairs answered consistently, and among them the Wilson lower bound of agreement above 50%
     (95% for the first look, 97.5% for D-122's second look: pass `Z["opus"]`)."""

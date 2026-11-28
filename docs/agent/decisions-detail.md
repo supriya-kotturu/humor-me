@@ -1620,7 +1620,7 @@ python -m sim.dpo_pairs judge --env-file backend/.env                   # after 
 python -m sim.dpo_pairs score --record                                  # writes reports/metrics/dpo_judge_gate.json
 python -m sim.dpo_pairs pool --split train --rebuild                    # later, with 3+ days stored, before any judge labelling
 ```
-**Verdict rule.** `pass`: judge labelling of the training split may run next (a later PR), after the training rebuild above. `fail`: D-102's fallback, more of your votes or another judge (D-122 took "another judge"). DPO does not run on a judge that fails.
+**Verdict rule.** `pass`: judge labelling of the training split may run next (a later PR), after the training rebuild above. `fail`: D-102's fallback, more of your votes or another judge (D-122 took "another judge"; Opus 5.5 also failed, 25 of 53, so DPO does not run on either judge's labels, see D-122's Result). DPO does not run on a judge that fails.
 
 **Pre-merge review (2026-11-26, before any data).** Fixed: (1) a plain bit written after a tonight bit kept the tonight day's allow lists in the safety check, so names a plain show rejects could pass; a re-checked bit got stale lists. (2) A bit with no thread (Ollama down, every call timed out) was saved as finished and never retried, so an outage mid-run would silently empty the rest of the split. (3) The fixed cell order (teach tonight, test tonight, teach plain, test plain) and a progress line split by teach and test told you which questions were test pairs. (4) The disjointness key held the bit number for the tonight half, so the same request at bits 4 and 5 passed (planted; now caught). (5) Gists reused by two ranking prompts could land in both a teach and a test prompt (4 of 21 on a made-up 21-gist day); prompts sharing a gist now share a role. (6) A rebuild set aside every training bit, the unchanged plain half too (about 400 bits, an hour of writing); unchanged prompts now keep their bit, a second rebuild no longer collides, and the writer rewrites a record made for another prompt with the same id. (7) The record's key now includes a digest of every answer (test answers are not in the teach prompt). Recomputed and unchanged: the least a (21 of 30, 30 of 45, 38 of 60) and the power figures (1.4%, 74%, 91%, 98%, 99.9%; D-102's 66%, 90%, 98%). **Scope, not fixed:** the gate measures agreement on pairs you had a preference on; ties and skips are left out of teach and test alike, so the judge's accuracy on training pairs you would have tied is not measured. The tie and skip counts are reported for that.
 
@@ -1697,4 +1697,32 @@ python -m sim.dpo_pairs score --model opus                          # table on s
 python -m sim.dpo_pairs score --model opus --record                 # writes reports/metrics/dpo_judge_gate_opus.json (Exp 37)
 python scripts/run_notebook.py notebooks/decisions-model.ipynb      # Exp 37 section fills in
 ```
-**Result: pending.** The user runs Exp 37 on this branch; the numbers and the outcome go in this entry in the same PR.
+**Result (2026-11-27): the bar was not met; verdict `fail`.** Run by the user on this branch (`judge --model opus`, then `score --model opus --record`; the re-rank was not run, so self-agreement is not run). Record: `reports/metrics/dpo_judge_gate_opus.json` (numbers only). Per D-122's rule, **DPO does not run on either judge's labels.** The user confirms the next step separately.
+
+| Check | Result | Bar |
+|---|---|---|
+| Test pairs answered the same way in both orders (c) | 53 of 60 | at least 30: met |
+| Of those, Opus picks the user's thread (a) | 25 of 53 = 47%, Wilson 97.5% range 33% to 62% | lower end above 50%: **not met** (35 of 53 was the least) |
+| Pairs where the orders disagree | 12% (7 of 60) | beside the bar |
+| Tonight half: consistent, agreeing | 29 of 30, 13 | beside the bar |
+| Plain half: consistent, agreeing | 24 of 30, 12 | beside the bar |
+| Strict count (a of all 60) | 25 of 60 (Wilson 97.5% 29% to 56%) | beside the bar |
+| Half-credit rate | 0.475 | beside the bar |
+| Ties / skips while ranking | 12 / 12 of 144 answers | beside the bar |
+| Self-agreement | not run | reported only |
+
+**Cost (measured, from the run's printed totals).** 120 calls: input 47,808 tokens, output 1,440 (thinking included, about 12 a call), cache read 2,864,806, cache write 24,074. At the prices above (4 in, 20 out, 0.20 cache read, 5 cache write, per million): 47,808 x 4 = $0.191, 1,440 x 20 = $0.029, 2,864,806 x 0.20 = $0.573, 24,074 x 5 = $0.120. **Total $0.91**, below the $1.1 to $3.1 estimate because Opus at effort low used almost no thinking tokens (1,440 against the assumed 24,000 to 120,000). Prices are the cached 2026-11-03 table, not re-checked.
+
+**Diagnostic: do the two judges agree with each other? (reported only, no bar; `dp.judge_vs_judge`, read only on the two stored caches, no calls).** On the test pairs both judges answered the same way in both orders: **41 pairs**. Likely ranges are Wilson 97.5% throughout.
+
+| On those 41 pairs | Count | Share | Likely range |
+|---|---|---|---|
+| haiku-5.5 judge and opus-5.5 judge pick the same thread | 32 | 78% | 61% to 89% |
+| haiku-5.5 judge picks the user's thread | 20 | 49% | 32% to 65% |
+| opus-5.5 judge picks the user's thread | 19 | 46% | 30% to 63% |
+
+Teach pairs: neither cache holds an answer for them (0 found), as expected: the 60 teach pairs are in the judge's prompt, not asked.
+
+Reading, cautiously. The two judges agree with each other far more (78%, range 61% to 89%) than either agrees with the user (46% to 49%, ranges that include 50%). That fits a shared taste between the two models that differs from the user's on these pairs. It also fits the user's picks on close pairs being noisy. Self-agreement was not run, so the two cannot be separated here. Earlier evidence points the same way: 24 of 144 ranking answers (17%) were ties or skips, so some pairs were hard for the user too. The judge pair share is on 41 pairs picked after seeing both results, so it is descriptive, not a test.
+
+**What it means for the report.** Two strong judges (Haiku 5.5, Opus 5.5, the second with thinking on and a stricter bar) sit at about a coin flip against one person's taste on close pairs from one writer: 24 of 46 and 25 of 53. That is a clean negative result for "an LLM judge as a stand-in for one person's taste on close pairs", not a result about Haiku or Opus in particular. What the data cannot say: whether any judge could do better (no user repeat rate), whether a judge does better on pairs less alike, or whether more teach pairs help (60 were used). The ship decision, per D-122's stated fallback, is the user's; this entry only records that DPO does not run on either judge's labels.

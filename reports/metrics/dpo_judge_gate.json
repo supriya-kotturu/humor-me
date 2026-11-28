@@ -1,4 +1,4 @@
-{"params": {"answers_digest": "1466530d", "judge_digest_": "4af1cf27", "min_consistent": 30, "pool_digest": "c66f28f4", "rank_seed": "dpo-rank-v1", "rerank_digest": ""}, "results": {
+{"params": {"answers_digest": "1466530d", "judge_digest_": "4af1cf27", "min_consistent": 30, "pool_digest": "c66f28f4", "rank_seed": "dpo-rank-v1", "rerank_digest": "f5e615a2"}, "results": {
   "verdict": "fail",
   "n_test": 60,
   "consistent": 46,
@@ -15,5 +15,5 @@
   "ties": 12,
   "skips": 12,
   "judge": {"provider": "anthropic", "model": "claude-haiku-5-5", "teach_pairs": 60},
-  "self_agreement": {"status": "not run"}
+  "self_agreement": {"status": "done", "answered": 20, "of": 20, "same": 12, "ties": 3, "wilson95": [0.3866, 0.7812], "judge_same_pairs": {"pairs": 10, "agree": 3, "flip": 4}}
 }}
